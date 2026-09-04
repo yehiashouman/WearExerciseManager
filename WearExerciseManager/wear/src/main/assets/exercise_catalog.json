@@ -1,0 +1,22 @@
+[
+  {"key":"bicep_curl","name":"Bicep Curl","icon":"strength"},
+  {"key":"hammer_curl","name":"Hammer Curl","icon":"strength"},
+  {"key":"shoulder_press","name":"Shoulder Press","icon":"strength"},
+  {"key":"bench_press","name":"Bench Press","icon":"strength"},
+  {"key":"push_up","name":"Push-up","icon":"strength"},
+  {"key":"squat","name":"Squat","icon":"legs"},
+  {"key":"lunge","name":"Lunge","icon":"legs"},
+  {"key":"deadlift","name":"Deadlift","icon":"strength"},
+  {"key":"plank","name":"Plank","icon":"core"},
+  {"key":"sit_up","name":"Sit-up","icon":"core"},
+  {"key":"jumping_jacks","name":"Jumping Jacks","icon":"cardio"},
+  {"key":"high_knees","name":"High Knees","icon":"cardio"},
+  {"key":"burpee","name":"Burpee","icon":"cardio"},
+  {"key":"running","name":"Running","icon":"run"},
+  {"key":"walking","name":"Walking","icon":"walk"},
+  {"key":"cycling","name":"Cycling","icon":"cycle"},
+  {"key":"rowing","name":"Rowing","icon":"cardio"},
+  {"key":"jump_rope","name":"Jump Rope","icon":"cardio"},
+  {"key":"mountain_climber","name":"Mountain Climber","icon":"cardio"},
+  {"key":"custom","name":"Custom","icon":"custom"}
+]
