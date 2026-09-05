@@ -37,8 +37,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yehiashouman.wearexercisemanager.AppViewModel
-import com.yehiashouman.wearexercisemanager.R
 import com.yehiashouman.wearexercisemanager.shared.*
+import com.yehiashouman.wearexercisemanager.shared.R as SharedR
 import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.voice.VoiceCoach
 import com.yehiashouman.wearexercisemanager.workout.WorkoutService
@@ -614,7 +614,9 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
         measurer.measure(AnnotatedString("About"), headingStyle).size.width.toDp()
     }
     Image(
-        painter = painterResource(R.drawable.ic_launcher_foreground),
+        // The artwork lives in the shared module; with a non-transitive R class it has to be
+        // referenced through that module's own R.
+        painter = painterResource(SharedR.drawable.ic_launcher_foreground),
         contentDescription = "Exercise Manager logo",
         modifier = Modifier.padding(vertical = 4.dp).width(width).aspectRatio(1f)
     )
