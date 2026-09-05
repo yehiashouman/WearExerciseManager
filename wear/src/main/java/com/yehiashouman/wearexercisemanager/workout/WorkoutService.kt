@@ -33,9 +33,15 @@ class WorkoutService : Service() {
         const val EXTRA_PRESET_ID = "preset_id"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "WorkoutService"
+        private const val MAX_PENDING_RETRIES = 5
 
         private val _state = MutableStateFlow(WorkoutUiState())
         val state: StateFlow<WorkoutUiState> = _state.asStateFlow()
+
+        /** Clears the post-workout summary once the user has acknowledged it. */
+        fun acknowledgeSummary() {
+            if (!_state.value.running) _state.value = WorkoutUiState()
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -53,12 +59,13 @@ class WorkoutService : Service() {
     private var intervalStart = 0L
     private var paused = false
     private var pausedStageRemaining = 0
+    private var intervalOpen = false
     private val intervals = mutableListOf<ExerciseInterval>()
     private val heartRates = mutableListOf<HeartRateSample>()
 
     override fun onCreate() {
         super.onCreate()
-        repo = AppRepository(applicationContext)
+        repo = AppRepository.getInstance(applicationContext)
         voice = VoiceCoach(applicationContext)
         commands = VoiceCommandListener(applicationContext, ::handleVoiceCommand)
         hr = HeartRateMonitor(applicationContext) { bpm ->
@@ -67,6 +74,7 @@ class WorkoutService : Service() {
         }
         sync = WearSyncManager(applicationContext)
         createNotificationChannel()
+        retryPendingPhoneTransfers()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -119,6 +127,7 @@ class WorkoutService : Service() {
         val item = plan[currentIndex]
         val settings = repo.store.value.settings
         intervalStart = System.currentTimeMillis()
+        intervalOpen = true
         _state.value = _state.value.copy(
             running = true,
             paused = false,
@@ -130,13 +139,14 @@ class WorkoutService : Service() {
             totalCycles = preset?.cycles ?: 1,
             remainingSeconds = item.set.durationSeconds,
             currentStep = currentIndex + 1,
-            listening = settings.alwaysListening
+            listening = settings.voiceCommands && commands.isAvailable
         )
         voice.speak(buildString {
             append(item.exercise.name).append(". ").append(item.set.label).append(".")
             if (item.set.reps > 0) append(" ${item.set.reps} reps.")
         }, true)
-        if (settings.alwaysListening && settings.voiceCommands) commands.start()
+        // Voice commands stay active during the exercise itself, not only during rest/transition.
+        activateCommands()
         runTimer(item.set.durationSeconds, WorkoutStage.EXERCISE) { completeCurrentInterval(); startRest() }
     }
 
@@ -146,7 +156,7 @@ class WorkoutService : Service() {
         if (rest == 0) startTransition() else {
             _state.value = _state.value.copy(stage = WorkoutStage.REST, remainingSeconds = rest)
             voice.speak("Rest.")
-            activateCommandsForPassiveStage()
+            activateCommands()
             runTimer(rest, WorkoutStage.REST) { startTransition() }
         }
     }
@@ -163,7 +173,7 @@ class WorkoutService : Service() {
         val phrase = if (sameExercise) "Next set in" else "Next exercise in"
         _state.value = _state.value.copy(stage = WorkoutStage.TRANSITION, remainingSeconds = seconds)
         voice.speak("$phrase $seconds")
-        activateCommandsForPassiveStage()
+        activateCommands()
         runTimer(seconds, WorkoutStage.TRANSITION, speakEverySecond = true) {
             currentIndex++
             startCurrentSet()
@@ -188,8 +198,11 @@ class WorkoutService : Service() {
         }
     }
 
+    /** Records the interval that is currently in progress. Safe to call more than once. */
     private fun completeCurrentInterval() {
+        if (!intervalOpen) return
         val item = plan.getOrNull(currentIndex) ?: return
+        intervalOpen = false
         val end = System.currentTimeMillis()
         val duration = ((end - intervalStart) / 1000L).toInt().coerceAtLeast(0)
         intervals += ExerciseInterval(
@@ -207,7 +220,7 @@ class WorkoutService : Service() {
 
     private fun advanceOne() {
         if (!_state.value.running) return
-        if (_state.value.stage == WorkoutStage.EXERCISE) completeCurrentInterval()
+        completeCurrentInterval()
         stageJob?.cancel()
         currentIndex++
         startCurrentSet()
@@ -216,7 +229,7 @@ class WorkoutService : Service() {
     private fun skipExercise() {
         if (!_state.value.running) return
         val currentExerciseId = plan.getOrNull(currentIndex)?.exercise?.id ?: return
-        if (_state.value.stage == WorkoutStage.EXERCISE) completeCurrentInterval()
+        completeCurrentInterval()
         stageJob?.cancel()
         val nextIndex = (currentIndex + 1 until plan.size).firstOrNull { plan[it].exercise.id != currentExerciseId }
         if (nextIndex == null) finishWorkout(SessionStatus.COMPLETED) else {
@@ -247,12 +260,10 @@ class WorkoutService : Service() {
         // Timer coroutine remains alive and continues from the exact remaining second.
     }
 
-    private fun activateCommandsForPassiveStage() {
-        val settings = repo.store.value.settings
-        if (settings.voiceCommands) {
-            commands.start()
-            _state.value = _state.value.copy(listening = true)
-        }
+    private fun activateCommands() {
+        if (!repo.store.value.settings.voiceCommands) return
+        commands.start()
+        _state.value = _state.value.copy(listening = commands.isAvailable)
     }
 
     private fun handleVoiceCommand(command: String) {
@@ -264,12 +275,14 @@ class WorkoutService : Service() {
             "repeat" -> repeatCurrent()
             "stop" -> finishWorkout(SessionStatus.STOPPED)
         }
-        if (repo.store.value.settings.alwaysListening && _state.value.running) scope.launch { delay(800); commands.start() }
+        // Recognition restarts itself, so no touch interaction is needed to keep listening.
     }
 
     private fun finishWorkout(status: SessionStatus) {
         if (!_state.value.running) return
         stageJob?.cancel()
+        // Make sure the final interval is recorded exactly once before the session is stored.
+        completeCurrentInterval()
         commands.stop()
         hr.stop()
         val p = preset ?: return
@@ -281,17 +294,49 @@ class WorkoutService : Service() {
             endedAtEpochMs = end,
             status = status,
             intervals = intervals.toList(),
-            heartRates = heartRates.toList()
+            heartRates = heartRates.toList(),
+            syncStatus = SyncStatus.PENDING_PHONE_TRANSFER
         )
         repo.addSession(session)
-        if (status == SessionStatus.COMPLETED) voice.speak("Workout complete.", true)
-        _state.value = WorkoutUiState(completed = status == SessionStatus.COMPLETED, presetName = p.name)
+        Log.i(TAG, "Workout ${status.name.lowercase()} - session ${session.id} saved locally with ${session.intervals.size} intervals")
+        val averageHeartRate = heartRates.filterNot { it.paused }.map { it.bpm }.average().takeIf { !it.isNaN() }
+        _state.value = WorkoutUiState(
+            completed = status == SessionStatus.COMPLETED,
+            stopped = status == SessionStatus.STOPPED,
+            presetName = p.name,
+            summaryDurationSeconds = ((end - sessionStart) / 1000L).toInt().coerceAtLeast(0),
+            summaryIntervals = session.intervals.size,
+            summaryAverageHeartRate = averageHeartRate
+        )
         scope.launch {
-            if (repo.store.value.settings.samsungHealthSync) {
-                val ok = sync.sendSession(session)
-                repo.markSynced(session.id, if (ok) SyncStatus.SYNCED else SyncStatus.FAILED)
-            }
+            // Speaking is awaited so the engine is not shut down mid-utterance, but never blocks
+            // persistence or the phone transfer.
+            if (status == SessionStatus.COMPLETED) voice.speakAndAwait("Workout complete.", true)
+            transferToPhone(session)
             stopWorkoutService()
+        }
+    }
+
+    /**
+     * Watch-to-phone transfer is independent of Samsung Health synchronization, which happens on
+     * the phone. A failed transfer keeps the session locally so it can be retried later.
+     */
+    private suspend fun transferToPhone(session: WorkoutSession) {
+        Log.i(TAG, "Attempting phone transfer for session ${session.id}")
+        val delivered = sync.sendSession(session)
+        repo.markSynced(session.id, if (delivered) SyncStatus.PHONE_RECEIVED else SyncStatus.PENDING_PHONE_TRANSFER)
+        Log.i(TAG, if (delivered) "Phone transfer succeeded for session ${session.id}"
+        else "Phone transfer failed for session ${session.id}; kept locally as pending")
+    }
+
+    private fun retryPendingPhoneTransfers() {
+        scope.launch {
+            val pending = repo.store.value.history
+                .filter { it.syncStatus != SyncStatus.PHONE_RECEIVED && it.syncStatus != SyncStatus.SYNCED }
+                .take(MAX_PENDING_RETRIES)
+            if (pending.isEmpty()) return@launch
+            Log.i(TAG, "Retrying phone transfer for ${pending.size} pending session(s)")
+            pending.forEach { transferToPhone(it) }
         }
     }
 
@@ -377,6 +422,7 @@ enum class WorkoutStage { IDLE, EXERCISE, REST, TRANSITION, PAUSED }
 data class WorkoutUiState(
     val running: Boolean = false,
     val completed: Boolean = false,
+    val stopped: Boolean = false,
     val paused: Boolean = false,
     val stage: WorkoutStage = WorkoutStage.IDLE,
     val presetName: String = "",
@@ -389,5 +435,8 @@ data class WorkoutUiState(
     val currentStep: Int = 0,
     val totalSteps: Int = 0,
     val heartRate: Double? = null,
-    val listening: Boolean = false
+    val listening: Boolean = false,
+    val summaryDurationSeconds: Int = 0,
+    val summaryIntervals: Int = 0,
+    val summaryAverageHeartRate: Double? = null
 )

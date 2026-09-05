@@ -6,7 +6,7 @@ import com.yehiashouman.wearexercisemanager.data.AppRepository
 import com.yehiashouman.wearexercisemanager.shared.*
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
-    val repository = AppRepository(application)
+    val repository = AppRepository.getInstance(application)
     val store = repository.store
 
     fun saveExercise(exercise: ExerciseDefinition) = repository.saveExercise(exercise)

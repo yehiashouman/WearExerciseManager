@@ -29,7 +29,15 @@ import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
 import java.util.*
 
-private enum class Screen { HOME, EXERCISES, EXERCISE_EDIT, WORKOUTS, WORKOUT_EDIT, HISTORY, SETTINGS, ABOUT, ACTIVE }
+private enum class Screen { HOME, EXERCISES, EXERCISE_EDIT, WORKOUTS, WORKOUT_EDIT, HISTORY, SETTINGS, ABOUT, ACTIVE, COMPLETE }
+
+/** Fraction of the available width used by the main buttons. */
+private const val ButtonWidthFraction = 0.70f
+
+/** Insets that keep content inside the visually safe circular area of a round watch display. */
+private val ScreenHorizontalInset = 16.dp
+private val ScreenTopInset = 24.dp
+private val ScreenBottomInset = 28.dp
 
 @Composable
 fun ExerciseManagerApp(
@@ -44,9 +52,12 @@ fun ExerciseManagerApp(
     var editingWorkout by remember { mutableStateOf<WorkoutPreset?>(null) }
     val accent = accentColor(store.settings.accentTheme)
 
-    LaunchedEffect(workout.running) {
-        if (workout.running) screen = Screen.ACTIVE
-        else if (screen == Screen.ACTIVE) screen = Screen.HOME
+    LaunchedEffect(workout.running, workout.completed, workout.stopped) {
+        when {
+            workout.running -> screen = Screen.ACTIVE
+            workout.completed || workout.stopped -> screen = Screen.COMPLETE
+            screen == Screen.ACTIVE -> screen = Screen.HOME
+        }
     }
 
     AppFrame(accent) {
@@ -96,13 +107,17 @@ fun ExerciseManagerApp(
             Screen.SETTINGS -> SettingsScreen(store.settings, accent, viewModel::updateSettings, { screen = Screen.HOME }, { screen = Screen.ABOUT })
             Screen.ABOUT -> AboutScreen(accent) { screen = Screen.SETTINGS }
             Screen.ACTIVE -> ActiveWorkoutScreen(workout, accent, onWorkoutAction)
+            Screen.COMPLETE -> WorkoutSummaryScreen(workout, accent) {
+                WorkoutService.acknowledgeSummary()
+                screen = Screen.HOME
+            }
         }
     }
 }
 
 @Composable
 private fun AppFrame(accent: Color, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.Black).padding(horizontal = 14.dp, vertical = 8.dp)) { content() }
+    Box(Modifier.fillMaxSize().background(Color.Black).padding(horizontal = ScreenHorizontalInset)) { content() }
 }
 
 @Composable
@@ -221,9 +236,27 @@ private fun ActiveWorkoutScreen(state: com.yehiashouman.wearexercisemanager.work
         Body(when (state.stage) { WorkoutStage.REST -> "REST"; WorkoutStage.TRANSITION -> "GET READY"; WorkoutStage.PAUSED -> "Paused"; else -> "Cycle ${state.cycle} of ${state.totalCycles}" }, true)
         state.heartRate?.let { Body("♥ ${it.toInt()} bpm") }
         Muted("Step ${state.currentStep} / ${state.totalSteps}${if (state.listening) "  •  Listening" else ""}")
-        if (state.paused) PrimaryButton("Resume", accent) { action(WorkoutService.ACTION_RESUME) }
-        else PrimaryButton("Pause", accent) { action(WorkoutService.ACTION_PAUSE) }
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Row(Modifier.fillMaxWidth(ButtonWidthFraction), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (state.paused) PrimaryButtonSurface("Resume", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_RESUME) }
+                else PrimaryButtonSurface("Pause", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_PAUSE) }
+                PrimaryButtonSurface("Skip", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_SKIP) }
+            }
+        }
         SmallButton("Stop", accent) { action(WorkoutService.ACTION_STOP) }
+    }
+}
+
+@Composable
+private fun WorkoutSummaryScreen(state: com.yehiashouman.wearexercisemanager.workout.WorkoutUiState, accent: Color, onDone:()->Unit) {
+    AppColumn(horizontal = Alignment.CenterHorizontally) {
+        Header(if (state.completed) "Workout Complete" else "Workout Stopped")
+        Body(state.presetName, true)
+        Label("Duration")
+        BasicText(formatTime(state.summaryDurationSeconds), style = TextStyle(accent, 28.sp, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth())
+        Body("${state.summaryIntervals} intervals completed")
+        state.summaryAverageHeartRate?.let { Body("♥ Avg ${it.toInt()} bpm") }
+        PrimaryButton("Done", accent, onClick = onDone)
     }
 }
 
@@ -240,7 +273,7 @@ private fun HistoryScreen(history: List<WorkoutSession>, accent: Color, onBack:(
             Muted("${seconds / 60} min active • ${s.intervals.size} intervals")
             val avg = s.heartRates.filterNot { it.paused }.map { it.bpm }.average()
             if (!avg.isNaN()) Muted("Avg HR ${avg.toInt()} bpm")
-            Muted("Samsung Health: ${s.syncStatus.name.lowercase()}")
+            Muted("Phone transfer: ${syncStatusLabel(s.syncStatus)}")
         } }
         if (history.isNotEmpty()) SmallButton("Clear History", accent, onClear)
         SmallButton("Back", accent, onBack)
@@ -261,7 +294,7 @@ private fun SettingsScreen(settings: AppSettings, accent: Color, save:(AppSettin
         Toggle("Spoken countdown", current.spokenCountdown, accent) { update(current.copy(spokenCountdown = it)) }
         Label("Countdown starts at"); Stepper(current.countdownStartSeconds, 5, accent) { update(current.copy(countdownStartSeconds = it.coerceIn(5, 30))) }
         Toggle("Voice commands", current.voiceCommands, accent) { update(current.copy(voiceCommands = it)) }
-        Toggle("Always listening", current.alwaysListening, accent) { update(current.copy(alwaysListening = it)) }
+        Muted("Commands are recognised continuously during exercise, rest and transitions.")
         Label("Training voice")
         val voices = coach.availableVoices().take(8)
         if (voices.isEmpty()) Muted("System English voice") else voices.forEach { v -> MiniButton((if (current.selectedVoiceName == v.name) "● " else "○ ") + v.name.take(26), accent) { update(current.copy(selectedVoiceName = v.name)) } }
@@ -301,7 +334,18 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
     }
 }
 
-@Composable private fun AppColumn(horizontal: Alignment.Horizontal = Alignment.Start, content:@Composable ColumnScope.()->Unit) = Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = horizontal, verticalArrangement = Arrangement.spacedBy(7.dp), content = content)
+@Composable private fun AppColumn(horizontal: Alignment.Horizontal = Alignment.Start, content:@Composable ColumnScope.()->Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        horizontalAlignment = horizontal,
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        // Round displays clip the corners, so the first and last items need extra breathing room.
+        Spacer(Modifier.height(ScreenTopInset))
+        content()
+        Spacer(Modifier.height(ScreenBottomInset))
+    }
+}
 @Composable private fun Header(text:String) = BasicText(text, style = TextStyle(Color.White, 20.sp, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp))
 @Composable private fun Section(text:String) = BasicText(text, style = TextStyle(Color.White, 16.sp, FontWeight.Bold), modifier = Modifier.padding(top = 8.dp))
 @Composable private fun Label(text:String) = BasicText(text, style = TextStyle(Color.LightGray, 11.sp))
@@ -313,9 +357,31 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 
 @Composable private fun Card(accent:Color, content:@Composable ColumnScope.()->Unit) = Column(Modifier.fillMaxWidth().background(Color(0xFF151515), RoundedCornerShape(14.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp), content = content)
 
-@Composable private fun PrimaryButton(text:String, accent:Color, enabled:Boolean=true, onClick:()->Unit) = Box(Modifier.fillMaxWidth().background(if(enabled) accent else Color.DarkGray, RoundedCornerShape(22.dp)).clickable(enabled = enabled, onClick = onClick).padding(11.dp), contentAlignment = Alignment.Center) { BasicText(text, style=TextStyle(Color.Black, 14.sp, FontWeight.Bold, textAlign = TextAlign.Center)) }
-@Composable private fun SmallButton(text:String, accent:Color, onClick:()->Unit) = Box(Modifier.fillMaxWidth().background(Color(0xFF202020), RoundedCornerShape(18.dp)).clickable(onClick=onClick).padding(9.dp)) { BasicText(text, style=TextStyle(if (accent == Color.White) Color.White else accent, 13.sp, FontWeight.Medium)) }
-@Composable private fun MiniButton(text:String, accent:Color, onClick:()->Unit) = Box(Modifier.background(Color(0xFF242424), RoundedCornerShape(14.dp)).clickable(onClick=onClick).padding(horizontal=9.dp, vertical=6.dp)) { BasicText(text, style=TextStyle(accent, 11.sp, FontWeight.Medium)) }
+/** Centers a button that only uses [ButtonWidthFraction] of the available width. */
+@Composable private fun CenteredButtonRow(content:@Composable ()->Unit) = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { content() }
+
+@Composable private fun PrimaryButtonSurface(text:String, accent:Color, enabled:Boolean, modifier: Modifier, onClick:()->Unit) = Box(
+    modifier.background(if(enabled) accent else Color.DarkGray, RoundedCornerShape(22.dp)).clickable(enabled = enabled, onClick = onClick).padding(11.dp),
+    contentAlignment = Alignment.Center
+) { BasicText(text, style=TextStyle(Color.Black, 14.sp, FontWeight.Bold, textAlign = TextAlign.Center)) }
+
+@Composable private fun PrimaryButton(text:String, accent:Color, enabled:Boolean=true, onClick:()->Unit) = CenteredButtonRow {
+    PrimaryButtonSurface(text, accent, enabled, Modifier.fillMaxWidth(ButtonWidthFraction), onClick)
+}
+
+@Composable private fun SmallButtonSurface(text:String, accent:Color, modifier: Modifier, onClick:()->Unit) = Box(
+    modifier.background(Color(0xFF202020), RoundedCornerShape(18.dp)).clickable(onClick=onClick).padding(9.dp),
+    contentAlignment = Alignment.Center
+) { BasicText(text, style=TextStyle(if (accent == Color.White) Color.White else accent, 13.sp, FontWeight.Medium, textAlign = TextAlign.Center)) }
+
+@Composable private fun SmallButton(text:String, accent:Color, onClick:()->Unit) = CenteredButtonRow {
+    SmallButtonSurface(text, accent, Modifier.fillMaxWidth(ButtonWidthFraction), onClick)
+}
+
+@Composable private fun MiniButton(text:String, accent:Color, onClick:()->Unit) = Box(
+    Modifier.background(Color(0xFF242424), RoundedCornerShape(14.dp)).clickable(onClick=onClick).padding(horizontal=6.dp, vertical=6.dp),
+    contentAlignment = Alignment.Center
+) { BasicText(text, style=TextStyle(accent, 11.sp, FontWeight.Medium, textAlign = TextAlign.Center)) }
 @Composable private fun Toggle(label:String, value:Boolean, accent:Color, onChange:(Boolean)->Unit) = SmallButton((if(value) "● " else "○ ") + label, accent) { onChange(!value) }
 
 @Composable private fun Stepper(value:Int, step:Int, accent:Color, suffix:String=" sec", onChange:(Int)->Unit) {
@@ -328,6 +394,12 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 }
 
 private fun <T> List<T>.replace(index:Int, item:T) = toMutableList().also { it[index]=item }.toList()
+private fun syncStatusLabel(status: SyncStatus) = when (status) {
+    SyncStatus.PHONE_RECEIVED -> "delivered to phone"
+    SyncStatus.SYNCED -> "synced"
+    SyncStatus.FAILED -> "failed"
+    else -> "pending"
+}
 private fun formatTime(seconds:Int) = "%02d:%02d".format(seconds / 60, seconds % 60)
 private fun accentColor(name:String) = when(name) { "green"->Color(0xFF55DD88); "orange"->Color(0xFFFFA64D); "red"->Color(0xFFFF6666); "purple"->Color(0xFFBB86FC); "monochrome"->Color.White; else->Color(0xFF63B3FF) }
 private fun iconGlyph(key:String) = when(key) { "strength"->"◆"; "legs"->"▲"; "core"->"●"; "cardio"->"♥"; "run"->"➤"; "walk"->"•"; "cycle"->"○"; else->"◇" }

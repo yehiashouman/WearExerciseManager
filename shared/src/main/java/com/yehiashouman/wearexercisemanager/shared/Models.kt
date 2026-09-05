@@ -10,7 +10,7 @@ enum class WorkoutStyle { SEQUENTIAL, CIRCUIT }
 enum class SessionStatus { COMPLETED, STOPPED }
 
 @Serializable
-enum class SyncStatus { PENDING, SYNCED, FAILED }
+enum class SyncStatus { PENDING, PENDING_PHONE_TRANSFER, PHONE_RECEIVED, SYNCED, FAILED }
 
 @Serializable
 data class ExerciseSet(
