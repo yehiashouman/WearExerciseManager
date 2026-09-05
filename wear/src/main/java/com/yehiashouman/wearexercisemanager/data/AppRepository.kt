@@ -19,7 +19,18 @@ private data class AppStore(
     val selectedPresetId: String? = null
 )
 
-class AppRepository(context: Context) {
+class AppRepository private constructor(context: Context) {
+    companion object {
+        @Volatile
+        private var instance: AppRepository? = null
+
+        /** Single process-wide repository so the UI and [WorkoutService] observe the same state. */
+        fun getInstance(context: Context): AppRepository =
+            instance ?: synchronized(this) {
+                instance ?: AppRepository(context.applicationContext).also { instance = it }
+            }
+    }
+
     private val file = File(context.filesDir, "exercise_manager.json")
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
     private val _store = MutableStateFlow(load())
@@ -64,6 +75,7 @@ class AppRepository(context: Context) {
         )
     }
 
+    @Synchronized
     private fun persist(next: AppStore) {
         _store.value = next
         exposed.value = next.toView()

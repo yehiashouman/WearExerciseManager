@@ -3,6 +3,12 @@ package com.yehiashouman.wearexercisemanager.shared
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
+/** Wearable Data Layer paths shared by the watch sender and the phone listener. */
+object WearDataPaths {
+    /** Must stay in sync with the mobile manifest's `android:pathPrefix`. */
+    const val SESSION_PREFIX = "/workout-session/"
+}
+
 @Serializable
 enum class WorkoutStyle { SEQUENTIAL, CIRCUIT }
 
@@ -10,7 +16,15 @@ enum class WorkoutStyle { SEQUENTIAL, CIRCUIT }
 enum class SessionStatus { COMPLETED, STOPPED }
 
 @Serializable
-enum class SyncStatus { PENDING, SYNCED, FAILED }
+enum class SyncStatus { PENDING, PENDING_PHONE_TRANSFER, PHONE_RECEIVED, SYNCED, FAILED }
+
+/** User facing description of a session transfer state, shared by the watch and phone UIs. */
+fun SyncStatus.displayLabel(): String = when (this) {
+    SyncStatus.PENDING, SyncStatus.PENDING_PHONE_TRANSFER -> "pending"
+    SyncStatus.PHONE_RECEIVED -> "delivered to phone"
+    SyncStatus.SYNCED -> "synced"
+    SyncStatus.FAILED -> "failed"
+}
 
 @Serializable
 data class ExerciseSet(

@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.yehiashouman.wearexercisemanager.mobile.sync.SessionStore
+import com.yehiashouman.wearexercisemanager.shared.displayLabel
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -17,7 +18,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                val sessions = remember { SessionStore(this).all().sortedByDescending { it.startedAtEpochMs } }
+                val store = remember { SessionStore.getInstance(applicationContext) }
+                val received by store.sessions.collectAsState()
+                val sessions = remember(received) { received.sortedByDescending { it.startedAtEpochMs } }
                 val fmt = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Exercise Manager Companion", style = MaterialTheme.typography.headlineSmall)
@@ -29,7 +32,7 @@ class MainActivity : ComponentActivity() {
                                 Text(session.presetName, style = MaterialTheme.typography.titleMedium)
                                 Text(fmt.format(Date(session.startedAtEpochMs)))
                                 Text("${session.intervals.size} exercise intervals")
-                                Text("Samsung Health: ${session.syncStatus.name.lowercase()}")
+                                Text("Watch transfer: ${session.syncStatus.displayLabel()}")
                             }
                         }
                     }
