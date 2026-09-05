@@ -22,6 +22,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Collections
 
 class WorkoutService : Service() {
     companion object {
@@ -65,7 +66,8 @@ class WorkoutService : Service() {
     /** Stage the workout is really in; [WorkoutStage.PAUSED] is a UI state layered on top of it. */
     private var activeStage = WorkoutStage.EXERCISE
     private val intervals = mutableListOf<ExerciseInterval>()
-    private val heartRates = mutableListOf<HeartRateSample>()
+    /** Written from the sensor callback and read when the session is stored, hence synchronized. */
+    private val heartRates = Collections.synchronizedList(mutableListOf<HeartRateSample>())
 
     override fun onCreate() {
         super.onCreate()
@@ -221,6 +223,10 @@ class WorkoutService : Service() {
         }
     }
 
+    /** Thread-safe snapshot of the samples collected so far. */
+    private val recordedHeartRates: List<HeartRateSample>
+        get() = synchronized(heartRates) { heartRates.toList() }
+
     /** Records the interval that is currently in progress. Safe to call more than once. */
     private fun completeCurrentInterval() {
         if (!intervalOpen) return
@@ -344,12 +350,12 @@ class WorkoutService : Service() {
             endedAtEpochMs = end,
             status = status,
             intervals = intervals.toList(),
-            heartRates = heartRates.toList(),
+            heartRates = recordedHeartRates,
             syncStatus = SyncStatus.PENDING
         )
         repo.addSession(session)
         Log.i(TAG, "Workout ${status.name.lowercase()} - session ${session.id} saved locally with ${session.intervals.size} intervals")
-        val averageHeartRate = heartRates.filterNot { it.paused }.map { it.bpm }.average().takeIf { !it.isNaN() }
+        val averageHeartRate = recordedHeartRates.filterNot { it.paused }.map { it.bpm }.average().takeIf { !it.isNaN() }
         _state.value = WorkoutUiState(
             completed = status == SessionStatus.COMPLETED,
             stopped = status == SessionStatus.STOPPED,

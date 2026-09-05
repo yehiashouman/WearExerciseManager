@@ -381,7 +381,8 @@ private fun ActiveWorkoutScreen(state: WorkoutUiState, showHeartRate: Boolean, a
             "Cycle ${state.cycle}/${state.totalCycles} • Step ${state.currentStep}/${state.totalSteps}",
             TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center)
         )
-        // One compact status line keeps the layout height stable whether or not heart rate is shown.
+        // The status line is always rendered, so hiding the heart rate reclaims the horizontal space
+        // without changing the height of the screen.
         val status = buildString {
             if (showHeartRate) append(heartRateText(state.heartRate))
             val voice = if (state.listening) "Listening" else "Voice off"
@@ -470,7 +471,7 @@ private fun SettingsScreen(settings: AppSettings, accent: Color, save:(AppSettin
         Label("Countdown starts at"); Stepper(current.countdownStartSeconds, 5, accent) { update(current.copy(countdownStartSeconds = it.coerceIn(5, 30))) }
         Toggle("Voice commands", current.voiceCommands, accent) { update(current.copy(voiceCommands = it)) }
         Toggle("Listen during exercise", current.alwaysListening, accent) { update(current.copy(alwaysListening = it)) }
-        Muted("With continuous listening off, commands are only recognised during rest, transitions and while paused.")
+        Muted("Listening during exercise is on by default. With it off, commands are only recognised during rest, transitions and while paused, so the microphone is idle while you train.")
         Label("Training voice")
         val voices = coach.availableVoices().take(8)
         if (voices.isEmpty()) Muted("System English voice") else voices.forEach { v -> MiniButton((if (current.selectedVoiceName == v.name) "● " else "○ ") + v.name.take(26), accent) { update(current.copy(selectedVoiceName = v.name)) } }

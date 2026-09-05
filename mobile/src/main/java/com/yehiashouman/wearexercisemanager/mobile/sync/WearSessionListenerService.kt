@@ -15,6 +15,7 @@ import com.yehiashouman.wearexercisemanager.shared.WearDataPaths
 import com.yehiashouman.wearexercisemanager.shared.WorkoutSession
 import com.google.android.gms.tasks.Tasks
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 
 /**
@@ -80,9 +81,13 @@ class WearSessionListenerService : WearableListenerService() {
             Log.i(TAG, "Samsung Health sync disabled on the watch; skipping session ${session.id}")
             return
         }
-        // Blocking is intentional: the service may be torn down as soon as onDataChanged returns,
-        // so the write has to finish while the process is still guaranteed to be alive.
-        runBlocking { samsungHealth.sync(session) }
+        // The write has to finish while onDataChanged is still running, because the service may be
+        // torn down right after it returns. The timeout keeps a slow gateway from stalling the
+        // listener callback and the remaining events in the same buffer.
+        val result: Result<Unit> = runCatching {
+            runBlocking { withTimeout(SYNC_TIMEOUT_MS) { samsungHealth.sync(session) } }
+        }.getOrElse { Result.failure(it) }
+        result
             .onFailure { Log.w(TAG, "Samsung Health sync unavailable for session ${session.id}: ${it.message}") }
             .onSuccess { Log.i(TAG, "Session ${session.id} written to Samsung Health") }
     }
@@ -110,5 +115,6 @@ class WearSessionListenerService : WearableListenerService() {
 
     private companion object {
         const val TAG = "WearSessionListener"
+        const val SYNC_TIMEOUT_MS = 10_000L
     }
 }
