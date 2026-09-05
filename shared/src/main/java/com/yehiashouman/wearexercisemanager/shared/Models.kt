@@ -24,6 +24,12 @@ object WearDataPaths {
     const val KEY_SESSION_JSON = "session_json"
     const val KEY_UPDATED_AT = "updated_at"
 
+    /**
+     * Mirrors [AppSettings.samsungHealthSync] so the phone knows whether the user wants the
+     * session forwarded to Samsung Health.
+     */
+    const val KEY_SAMSUNG_HEALTH_SYNC = "samsung_health_sync"
+
     /** Keys of the payload written on [SESSION_ACK_PREFIX] data items. */
     const val KEY_SESSION_ID = "session_id"
     const val KEY_ACK_AT = "acknowledged_at"
@@ -141,22 +147,50 @@ data class WorkoutSession(
     val syncStatus: SyncStatus = SyncStatus.PENDING
 )
 
+/**
+ * Every field is persisted by the watch repository and read at the place documented below; see
+ * SETTINGS_AUDIT.md for the full setting -> storage -> behaviour mapping.
+ */
 @Serializable
 data class AppSettings(
+    /** Master switch for spoken guidance (`VoiceCoach.speakInternal`). */
     val voiceAnnouncements: Boolean = true,
+    /** Speaks the remaining seconds near the end of a stage (`WorkoutService.runTimer`). */
     val spokenCountdown: Boolean = true,
+    /** Second from which the spoken countdown starts (`WorkoutService.runTimer`). */
     val countdownStartSeconds: Int = 10,
+    /** Enables the speech recogniser during a workout (`WorkoutService.activateCommands`). */
     val voiceCommands: Boolean = true,
-    val alwaysListening: Boolean = false,
+    /**
+     * Keeps the recogniser active during the exercise stage as well. When disabled, commands are
+     * only recognised during rest, transition and pause so the microphone is off while training.
+     *
+     * The default is `true` on purpose: the flag used to be unused and the service listened during
+     * every stage. The watch repository serializes with the kotlinx.serialization default of
+     * `encodeDefaults = false`, so existing stores never wrote the old `false` value and therefore
+     * keep exactly the behaviour they had before this setting was wired up.
+     */
+    val alwaysListening: Boolean = true,
+    /** Text-to-speech rate (`VoiceCoach.applySettings`). */
     val speechRate: Float = 1.0f,
+    /** Text-to-speech voice (`VoiceCoach.applySettings`). */
     val selectedVoiceName: String? = null,
+    /** Pre-filled set duration for newly created sets (`ExerciseEditor`). */
     val defaultSetDurationSeconds: Int = 30,
+    /** Increment of the duration steppers (`ExerciseEditor`). */
     val durationStepSeconds: Int = 15,
+    /** Pre-filled rest duration for newly created sets (`ExerciseEditor`). */
     val defaultRestSeconds: Int = 30,
+    /** Countdown between two sets (`WorkoutService.startTransition`). */
     val transitionSeconds: Int = 5,
+    /** Shows the live heart rate on the active workout screen (`ActiveWorkoutScreen`). */
     val showHeartRate: Boolean = true,
+    /** Stores heart-rate samples in the session history (heart-rate callback in `WorkoutService.onCreate`). */
     val recordHeartRate: Boolean = true,
+    /** Haptic feedback on every stage change (`WorkoutService.vibrate`). */
     val vibration: Boolean = true,
+    /** Forwarded to the phone so it can decide whether to write to Samsung Health. */
     val samsungHealthSync: Boolean = true,
+    /** Accent colour of the whole watch UI (`ExerciseManagerApp`). */
     val accentTheme: String = "system"
 )

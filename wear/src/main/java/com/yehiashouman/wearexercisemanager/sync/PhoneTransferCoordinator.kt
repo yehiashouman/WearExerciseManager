@@ -55,7 +55,7 @@ class PhoneTransferCoordinator private constructor(context: Context) {
                 if (repo.sessionStatus(session.id) == SyncStatus.DELIVERED) return@withLock
                 repo.markTransferStatus(session.id, SyncStatus.SENDING)
                 Log.i(TAG, "Sending session ${session.id} to the phone")
-                val accepted = sync.sendSession(session)
+                val accepted = sync.sendSession(session, repo.store.value.settings.samsungHealthSync)
                 // The phone acknowledgement is still outstanding. An acknowledgement that arrived
                 // while the payload was written wins, because the repository keeps DELIVERED final.
                 repo.markTransferStatus(session.id, if (accepted) SyncStatus.PENDING else SyncStatus.FAILED)
