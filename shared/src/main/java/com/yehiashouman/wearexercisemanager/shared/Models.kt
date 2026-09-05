@@ -1,12 +1,32 @@
 package com.yehiashouman.wearexercisemanager.shared
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import java.util.UUID
 
 /** Wearable Data Layer paths shared by the watch sender and the phone listener. */
 object WearDataPaths {
     /** Must stay in sync with the mobile manifest's `android:pathPrefix`. */
     const val SESSION_PREFIX = "/workout-session/"
+
+    /**
+     * Phone -> watch acknowledgement written once a session has been persisted on the phone.
+     * Must stay in sync with the wear manifest's `android:pathPrefix`.
+     */
+    const val SESSION_ACK_PREFIX = "/workout-session-ack/"
+
+    /** Keys of the payload written on [SESSION_PREFIX] data items. */
+    const val KEY_SESSION_JSON = "session_json"
+    const val KEY_UPDATED_AT = "updated_at"
+
+    /** Keys of the payload written on [SESSION_ACK_PREFIX] data items. */
+    const val KEY_SESSION_ID = "session_id"
+    const val KEY_ACK_AT = "acknowledged_at"
 }
 
 @Serializable
@@ -15,15 +35,50 @@ enum class WorkoutStyle { SEQUENTIAL, CIRCUIT }
 @Serializable
 enum class SessionStatus { COMPLETED, STOPPED }
 
-@Serializable
-enum class SyncStatus { PENDING, PENDING_PHONE_TRANSFER, PHONE_RECEIVED, SYNCED, FAILED }
+/**
+ * Single transfer state model used by both applications.
+ *
+ * [PENDING]   the session exists locally but the phone has not confirmed it yet;
+ * [SENDING]   a transfer attempt is currently running on the watch;
+ * [DELIVERED] the phone explicitly confirmed that the session was received *and* persisted;
+ * [FAILED]    the transfer attempt failed and has to be retried.
+ */
+@Serializable(with = SyncStatusSerializer::class)
+enum class SyncStatus { PENDING, SENDING, DELIVERED, FAILED }
 
-/** User facing description of a session transfer state, shared by the watch and phone UIs. */
-fun SyncStatus.displayLabel(): String = when (this) {
-    SyncStatus.PENDING, SyncStatus.PENDING_PHONE_TRANSFER -> "pending"
-    SyncStatus.PHONE_RECEIVED -> "delivered to phone"
-    SyncStatus.SYNCED -> "synced"
-    SyncStatus.FAILED -> "failed"
+/**
+ * Accepts the legacy status names that may still be present in previously persisted files so an
+ * existing install keeps its history instead of failing to decode it.
+ */
+object SyncStatusSerializer : KSerializer<SyncStatus> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("SyncStatus", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: SyncStatus) = encoder.encodeString(value.name)
+
+    override fun deserialize(decoder: Decoder): SyncStatus = when (decoder.decodeString()) {
+        "PENDING", "PENDING_PHONE_TRANSFER" -> SyncStatus.PENDING
+        "SENDING" -> SyncStatus.SENDING
+        "DELIVERED", "PHONE_RECEIVED", "SYNCED" -> SyncStatus.DELIVERED
+        "FAILED" -> SyncStatus.FAILED
+        // An unknown state is treated as not yet confirmed, so it is retried instead of lost.
+        else -> SyncStatus.PENDING
+    }
+}
+
+/** Watch wording: the watch is the sender, so it may report a delivery. */
+fun SyncStatus.watchLabel(): String = when (this) {
+    SyncStatus.PENDING -> "Pending"
+    SyncStatus.SENDING -> "Sending"
+    SyncStatus.DELIVERED -> "Delivered"
+    SyncStatus.FAILED -> "Failed"
+}
+
+/** Phone wording: the phone is the receiver, so it never reports "Delivered". */
+fun SyncStatus.phoneLabel(): String = when (this) {
+    SyncStatus.DELIVERED -> "Received"
+    SyncStatus.FAILED -> "Failed"
+    SyncStatus.PENDING, SyncStatus.SENDING -> "Pending"
 }
 
 @Serializable

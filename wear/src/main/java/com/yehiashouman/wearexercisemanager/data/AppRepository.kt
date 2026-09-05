@@ -120,9 +120,23 @@ class AppRepository private constructor(context: Context) {
 
     fun clearHistory() = persist(_store.value.copy(history = emptyList()))
 
-    fun markSynced(sessionId: String, status: SyncStatus) {
-        persist(_store.value.copy(history = _store.value.history.map { if (it.id == sessionId) it.copy(syncStatus = status) else it }))
+    /**
+     * Persists the transfer state of a session so it survives a process restart. The confirmed
+     * [SyncStatus.DELIVERED] state is final: a transfer attempt racing with the phone
+     * acknowledgement can never downgrade it again.
+     */
+    @Synchronized
+    fun markTransferStatus(sessionId: String, status: SyncStatus) {
+        val current = _store.value
+        val session = current.history.firstOrNull { it.id == sessionId } ?: return
+        if (session.syncStatus == status) return
+        if (session.syncStatus == SyncStatus.DELIVERED && status != SyncStatus.DELIVERED) return
+        persist(current.copy(history = current.history.map { if (it.id == sessionId) it.copy(syncStatus = status) else it }))
     }
+
+    /** Current transfer state of a session, or `null` when the session is unknown. */
+    fun sessionStatus(sessionId: String): SyncStatus? =
+        _store.value.history.firstOrNull { it.id == sessionId }?.syncStatus
 }
 
 data class AppStoreView(

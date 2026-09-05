@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.ui.ExerciseManagerApp
 import com.yehiashouman.wearexercisemanager.workout.WorkoutService
 
@@ -34,6 +35,12 @@ class MainActivity : ComponentActivity() {
                 }
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Sessions the phone has not acknowledged yet get another chance whenever the app is used.
+        PhoneTransferCoordinator.getInstance(this).retryPendingTransfers()
     }
 
     private fun requestWorkoutPermissions() {

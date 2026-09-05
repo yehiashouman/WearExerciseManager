@@ -30,6 +30,18 @@ Recommended GitHub repository name: `WearExerciseManager`
 - Dark UI with selectable accent color.
 - About screen links to https://www.yehiashouman.com.
 
+## Watch to phone transfer
+
+Both applications share one transfer state model (`SyncStatus`): `PENDING`, `SENDING`, `DELIVERED`, `FAILED`.
+
+1. The watch stores the finished `WorkoutSession` with its permanent UUID and status `PENDING`.
+2. The watch writes the payload to `/workout-session/<workoutId>` and stays `PENDING` until the phone answers.
+3. The phone persists the session (insert or update by workout id, so a retry cannot duplicate it) and shows `Watch transfer: Received`.
+4. The phone acknowledges the workout id on `/workout-session-ack/<workoutId>`.
+5. Only that acknowledgement moves the watch to `Phone transfer: Delivered`.
+
+Sessions the phone has not acknowledged are retried when the workout service starts, when the watch app is resumed and when History is opened.
+
 ## Samsung Health
 
 Samsung Health Data SDK v1.1.0 targets Android smartphones. Writing exercise data requires Samsung Health Data SDK partnership approval and an access code. The proprietary SDK AAR is therefore intentionally not committed.
