@@ -2,10 +2,12 @@ package com.yehiashouman.wearexercisemanager.workout
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.yehiashouman.wearexercisemanager.MainActivity
 import com.yehiashouman.wearexercisemanager.data.AppRepository
 import com.yehiashouman.wearexercisemanager.health.HeartRateMonitor
@@ -28,6 +30,7 @@ class WorkoutService : Service() {
         const val ACTION_REPEAT = "workout.repeat"
         const val ACTION_STOP = "workout.stop"
         const val EXTRA_PRESET_ID = "preset_id"
+        private const val NOTIFICATION_ID = 1001
 
         private val _state = MutableStateFlow(WorkoutUiState())
         val state: StateFlow<WorkoutUiState> = _state.asStateFlow()
@@ -66,7 +69,14 @@ class WorkoutService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> intent.getStringExtra(EXTRA_PRESET_ID)?.let(::startWorkout)
+            ACTION_START -> {
+                // The service is started with startForegroundService(), so a notification must be
+                // posted immediately, even if the workout cannot be built.
+                if (!startForegroundCompat()) return START_NOT_STICKY
+                val presetId = intent.getStringExtra(EXTRA_PRESET_ID)
+                if (presetId != null) startWorkout(presetId)
+                if (!_state.value.running) stopWorkoutService()
+            }
             ACTION_PAUSE -> pauseWorkout()
             ACTION_RESUME -> resumeWorkout()
             ACTION_NEXT -> advanceOne()
@@ -93,7 +103,6 @@ class WorkoutService : Service() {
         paused = false
         voice.applySettings(store.settings)
         if (store.settings.recordHeartRate) hr.start()
-        startForegroundCompat()
         _state.value = WorkoutUiState(running = true, presetName = found.name, totalSteps = plan.size)
         startCurrentSet()
     }
@@ -280,16 +289,52 @@ class WorkoutService : Service() {
                 val ok = sync.sendSession(session)
                 repo.markSynced(session.id, if (ok) SyncStatus.SYNCED else SyncStatus.FAILED)
             }
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            stopWorkoutService()
         }
     }
 
-    private fun startForegroundCompat() {
+    private fun startForegroundCompat(): Boolean {
+        if (Build.VERSION.SDK_INT >= 34 && allowedForegroundServiceTypes() == 0) {
+            // Without BODY_SENSORS or RECORD_AUDIO the declared service types cannot be used.
+            stopWorkoutService()
+            return false
+        }
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else startForeground(1001, notification)
+        return try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, notification, allowedForegroundServiceTypes())
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (e: Exception) {
+            // Missing runtime permissions or background start restrictions must not crash the app.
+            stopWorkoutService()
+            false
+        }
+    }
+
+    /**
+     * On Android 14+ a foreground service type may only be used when its backing runtime
+     * permission has been granted, otherwise startForeground() throws a SecurityException.
+     */
+    private fun allowedForegroundServiceTypes(): Int {
+        var types = 0
+        if (hasPermission(android.Manifest.permission.BODY_SENSORS)) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+        }
+        if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        return types
+    }
+
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun stopWorkoutService() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun buildNotification(): Notification {
