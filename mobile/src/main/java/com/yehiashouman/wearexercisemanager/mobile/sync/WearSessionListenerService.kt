@@ -80,6 +80,8 @@ class WearSessionListenerService : WearableListenerService() {
             Log.i(TAG, "Samsung Health sync disabled on the watch; skipping session ${session.id}")
             return
         }
+        // Blocking is intentional: the service may be torn down as soon as onDataChanged returns,
+        // so the write has to finish while the process is still guaranteed to be alive.
         runBlocking { samsungHealth.sync(session) }
             .onFailure { Log.w(TAG, "Samsung Health sync unavailable for session ${session.id}: ${it.message}") }
             .onSuccess { Log.i(TAG, "Session ${session.id} written to Samsung Health") }

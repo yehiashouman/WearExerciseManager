@@ -380,7 +380,8 @@ private fun ActiveWorkoutScreen(state: WorkoutUiState, showHeartRate: Boolean, a
         }
         SafeText(status, TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
         // Identical controls: same size, same neutral background, same white icons, equal spacing.
-        // The row wraps its content so the three buttons stay centred inside the round display.
+        // The row wraps its content and is centred by the column; the three buttons already fit the
+        // safe width because WatchMetrics derives controlSize from ControlRowWidthFraction.
         Row(
             horizontalArrangement = Arrangement.spacedBy(m.controlGap),
             verticalAlignment = Alignment.CenterVertically

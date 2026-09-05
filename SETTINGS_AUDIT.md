@@ -22,7 +22,7 @@ survives an app or watch restart.
 | Transition countdown | `transitionSeconds` | `WorkoutService.startTransition` | Countdown between two sets; `0` moves to the next set immediately. |
 | Show heart rate | `showHeartRate` | `ActiveWorkoutScreen` (+ sensor start in `WorkoutService.startWorkout`) | On: the workout screen shows `♥ 112 bpm`, or `♥ -- bpm` while no reading is available. Off: the readout is hidden and the space is reclaimed. |
 | Record heart rate | `recordHeartRate` | `WorkoutService` heart-rate callback | On: samples are stored in the session and the summary/history show the average. |
-| Vibration | `vibration` | `WorkoutService.vibrate` (`health/Haptics.kt`) | On: a haptic pulse on set start, a double pulse on rest, a longer pattern on pause/resume and workout end. |
+| Vibration | `vibration` | `WorkoutService.vibrate` (`health/Haptics.kt`) | On: a short pulse on set start and on pause/resume, a double pulse when rest begins and a longer pattern at the end of the workout. |
 | Samsung Health sync | `samsungHealthSync` | Sent as `WearDataPaths.KEY_SAMSUNG_HEALTH_SYNC`, read in `WearSessionListenerService.syncToSamsungHealth` | On: the phone forwards a received session to the Samsung Health gateway. Off: the session is still stored and acknowledged, only the Samsung Health write is skipped. |
 | Accent theme | `accentTheme` | `ExerciseManagerApp` → `accentColor` | Accent colour of every screen. |
 

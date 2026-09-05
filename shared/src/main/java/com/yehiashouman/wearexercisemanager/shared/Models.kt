@@ -164,6 +164,10 @@ data class AppSettings(
     /**
      * Keeps the recogniser active during the exercise stage as well. When disabled, commands are
      * only recognised during rest, transition and pause so the microphone is off while training.
+     *
+     * The default is `true` on purpose: the flag used to be unused and the service listened during
+     * every stage, so existing installs (which never persisted the field because it matched the old
+     * default) keep exactly the behaviour they had before this setting was wired up.
      */
     val alwaysListening: Boolean = true,
     /** Text-to-speech rate (`VoiceCoach.applySettings`). */
