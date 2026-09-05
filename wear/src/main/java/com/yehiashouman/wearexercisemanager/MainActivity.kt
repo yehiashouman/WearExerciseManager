@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yehiashouman.wearexercisemanager.health.HeartRatePermissions
 import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.ui.ExerciseManagerApp
 import com.yehiashouman.wearexercisemanager.workout.WorkoutService
@@ -45,10 +46,12 @@ class MainActivity : ComponentActivity() {
 
     private fun requestWorkoutPermissions() {
         val permissions = buildList {
-            add(Manifest.permission.BODY_SENSORS)
+            // Either the legacy BODY_SENSORS or the granular health permission, depending on the
+            // platform the watch runs on.
+            addAll(HeartRatePermissions.requestable())
             add(Manifest.permission.RECORD_AUDIO)
             if (android.os.Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-            if (android.os.Build.VERSION.SDK_INT >= 33) add(Manifest.permission.BODY_SENSORS_BACKGROUND)
+            if (android.os.Build.VERSION.SDK_INT in 33..35) add(Manifest.permission.BODY_SENSORS_BACKGROUND)
         }.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (permissions.isNotEmpty()) permissionLauncher.launch(permissions.toTypedArray())
     }

@@ -3,6 +3,7 @@ package com.yehiashouman.wearexercisemanager.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,17 +21,23 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yehiashouman.wearexercisemanager.AppViewModel
+import com.yehiashouman.wearexercisemanager.R
 import com.yehiashouman.wearexercisemanager.shared.*
 import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.voice.VoiceCoach
@@ -51,6 +58,15 @@ private const val ButtonWidthFraction = 0.70f
  * the circular glass cuts the rectangular layout box.
  */
 private const val SafeWidthFraction = 0.78f
+
+/**
+ * Width the three workout controls may occupy together. The row is rendered low on the display, so
+ * it has to stay inside the chord of the circle at that height instead of the full layout width.
+ */
+private const val ControlRowWidthFraction = 0.70f
+
+/** Neutral background shared by all workout controls so they are visually identical. */
+private val ControlBackground = Color(0xFF2E2E2E)
 
 /**
  * Screen dependent metrics so the layout adapts to the actual round display instead of relying on
@@ -81,9 +97,10 @@ private fun watchMetrics(width: Dp, height: Dp): WatchMetrics {
     // 192dp is the classic round baseline; larger watches scale up moderately.
     val scale = (shortest.value / 192f).coerceIn(0.85f, 1.25f)
     fun sp(base: Float, min: Float, max: Float) = (base * scale).coerceIn(min, max).sp
-    val controlGap = (8f * scale).coerceIn(6f, 10f)
-    // Three equally sized controls plus their gaps have to fit the usable width of the display.
-    val control = ((width.value * 0.90f - 2f * controlGap) / 3f).coerceIn(46f, 60f)
+    val controlGap = (7f * scale).coerceIn(6f, 10f)
+    // The control row sits low on the display, where the circular glass already narrows the usable
+    // width to roughly 70% of the layout box, so three equal controls plus their gaps must fit that.
+    val control = ((width.value * ControlRowWidthFraction - 2f * controlGap) / 3f).coerceIn(38f, 52f)
     return WatchMetrics(
         width = width,
         height = height,
@@ -93,17 +110,17 @@ private fun watchMetrics(width: Dp, height: Dp): WatchMetrics {
         bottomInset = (height.value * 0.08f).coerceIn(12f, 26f).dp,
         gap = (5f * scale).coerceIn(3f, 8f).dp,
         // Screens that must not scroll use the tighter rhythm.
-        tightGap = (3f * scale).coerceIn(2f, 6f).dp,
-        timer = sp(29f, 28f, 34f),
-        metricValue = sp(26f, 23f, 30f),
-        heading = sp(19f, 18f, 24f),
-        title = sp(17f, 16f, 22f),
-        body = sp(14f, 13f, 17f),
-        label = sp(12f, 11f, 15f),
-        button = sp(14f, 13f, 16f),
+        tightGap = (2.5f * scale).coerceIn(2f, 4f).dp,
+        timer = sp(26f, 23f, 31f),
+        metricValue = sp(23f, 20f, 27f),
+        heading = sp(18f, 16f, 22f),
+        title = sp(14f, 13f, 17f),
+        body = sp(13f, 12f, 16f),
+        label = sp(10.5f, 10f, 13f),
+        button = sp(13f, 12f, 15f),
         controlSize = control.dp,
         controlGap = controlGap.dp,
-        controlIcon = (control * 0.45f).dp
+        controlIcon = (control * 0.40f).dp
     )
 }
 
@@ -186,7 +203,7 @@ fun ExerciseManagerApp(
             Screen.HISTORY -> HistoryScreen(store.history, accent, { screen = Screen.HOME }, viewModel::clearHistory)
             Screen.SETTINGS -> SettingsScreen(store.settings, accent, viewModel::updateSettings, { screen = Screen.HOME }, { screen = Screen.ABOUT })
             Screen.ABOUT -> AboutScreen(accent) { screen = Screen.SETTINGS }
-            Screen.ACTIVE -> ActiveWorkoutScreen(workout, accent, onWorkoutAction)
+            Screen.ACTIVE -> ActiveWorkoutScreen(workout, store.settings.showHeartRate, accent, onWorkoutAction)
             Screen.COMPLETE -> WorkoutSummaryScreen(workout, accent) {
                 WorkoutService.acknowledgeSummary()
                 screen = Screen.HOME
@@ -209,9 +226,10 @@ private fun AppFrame(accent: Color, content: @Composable () -> Unit) {
 
 @Composable
 private fun HomeScreen(selected: WorkoutPreset?, presets: List<WorkoutPreset>, accent: Color, onSelect: (String)->Unit, onStart:()->Unit, onExercises:()->Unit, onWorkouts:()->Unit, onHistory:()->Unit, onSettings:()->Unit) {
-    AppColumn {
+    // Both headings are centred so the home screen stays symmetric on the circular display.
+    AppColumn(horizontal = Alignment.CenterHorizontally) {
         Header("Exercise Manager")
-        Label("Selected Workout")
+        CenteredLabel("Select Workout")
         if (presets.isEmpty()) Muted("No workouts yet") else presets.forEach { p ->
             SmallButton((if (p.id == selected?.id) "● " else "○ ") + p.name, accent) { onSelect(p.id) }
         }
@@ -314,26 +332,34 @@ private fun WorkoutEditor(original: WorkoutPreset?, exercises: List<ExerciseDefi
 }
 
 @Composable
-private fun ActiveWorkoutScreen(state: WorkoutUiState, accent: Color, action:(String)->Unit) {
+private fun ActiveWorkoutScreen(state: WorkoutUiState, showHeartRate: Boolean, accent: Color, action:(String)->Unit) {
     val m = currentWatchMetrics
     // Everything the athlete needs is visible at once: this screen never scrolls.
-    FixedScreen {
-        val stageLine = when (state.stage) {
+    FixedScreen(bottomFraction = 0.145f) {
+        val stageToken = when (state.stage) {
             WorkoutStage.REST -> "REST"
             WorkoutStage.TRANSITION -> "GET READY"
             WorkoutStage.PAUSED -> "PAUSED"
-            else -> buildString {
-                append(state.setLabel)
-                if (state.reps > 0) { if (isNotEmpty()) append(" • "); append("${state.reps} reps") }
-            }
+            else -> "WORK"
         }
+        val detail = if (state.stage == WorkoutStage.EXERCISE) buildString {
+            if (state.setLabel.isNotBlank()) append(state.setLabel)
+            if (state.reps > 0) { if (isNotEmpty()) append(" • "); append("${state.reps} reps") }
+        } else ""
+        val stageLine = if (detail.isBlank()) stageToken else "$stageToken • $detail"
+
         SafeText(
             state.exerciseName.ifBlank { state.presetName },
             TextStyle(Color.White, m.title, FontWeight.Bold, textAlign = TextAlign.Center)
         )
-        if (stageLine.isNotBlank()) SafeText(
+        SafeText(
             stageLine,
-            TextStyle(if (state.paused) accent else Color.LightGray, m.label, FontWeight.Medium, textAlign = TextAlign.Center)
+            TextStyle(
+                if (state.paused) accent else if (state.stage == WorkoutStage.REST) Color(0xFF8AD0FF) else Color.LightGray,
+                m.label,
+                FontWeight.Medium,
+                textAlign = TextAlign.Center
+            )
         )
         BasicText(
             formatTime(state.remainingSeconds),
@@ -345,34 +371,44 @@ private fun ActiveWorkoutScreen(state: WorkoutUiState, accent: Color, action:(St
             "Cycle ${state.cycle}/${state.totalCycles} • Step ${state.currentStep}/${state.totalSteps}",
             TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center)
         )
-        val extras = buildString {
-            state.heartRate?.let { append("♥ ${it.toInt()} bpm") }
-            if (state.listening) { if (isNotEmpty()) append("  •  "); append("Listening") }
+        // One compact status line keeps the layout height stable whether or not heart rate is shown.
+        val status = buildString {
+            if (showHeartRate) append(heartRateText(state.heartRate))
+            val voice = if (state.listening) "Listening" else "Voice off"
+            if (isNotEmpty()) append("  •  ")
+            append(voice)
         }
-        if (extras.isNotEmpty()) SafeText(extras, TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
-        Row(horizontalArrangement = Arrangement.spacedBy(m.controlGap), verticalAlignment = Alignment.CenterVertically) {
+        SafeText(status, TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
+        // Identical controls: same size, same neutral background, same white icons, equal spacing.
+        // The row wraps its content so the three buttons stay centred inside the round display.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(m.controlGap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (state.paused) {
-                ControlButton(ControlIcon.PLAY, accent, Color.Black, "Resume") { action(WorkoutService.ACTION_RESUME) }
+                ControlButton(ControlIcon.PLAY, "Resume") { action(WorkoutService.ACTION_RESUME) }
             } else {
-                ControlButton(ControlIcon.PAUSE, accent, Color.Black, "Pause") { action(WorkoutService.ACTION_PAUSE) }
+                ControlButton(ControlIcon.PAUSE, "Pause") { action(WorkoutService.ACTION_PAUSE) }
             }
-            ControlButton(ControlIcon.SKIP, Color(0xFF202020), accent, "Skip to next exercise") { action(WorkoutService.ACTION_SKIP) }
-            ControlButton(ControlIcon.STOP, Color(0xFF202020), Color(0xFFFF6666), "Stop workout") { action(WorkoutService.ACTION_STOP) }
+            ControlButton(ControlIcon.SKIP, "Skip to next exercise") { action(WorkoutService.ACTION_SKIP) }
+            ControlButton(ControlIcon.STOP, "Stop workout") { action(WorkoutService.ACTION_STOP) }
         }
     }
 }
+
+/** Compact heart-rate readout; an unavailable measurement never changes the line length much. */
+private fun heartRateText(bpm: Double?) = "♥ ${bpm?.toInt()?.toString() ?: "--"} bpm"
 
 @Composable
 private fun WorkoutSummaryScreen(state: WorkoutUiState, accent: Color, onDone:()->Unit) {
     val m = currentWatchMetrics
     // The whole summary has to be readable without scrolling, so the type scale stays modest.
-    FixedScreen {
+    FixedScreen(bottomFraction = 0.11f) {
         SafeText(
             if (state.completed) "Workout Complete" else "Workout Stopped",
             TextStyle(Color.White, m.heading, FontWeight.Bold, textAlign = TextAlign.Center)
         )
         SafeText(state.presetName, TextStyle(Color.White, m.body, FontWeight.Bold, textAlign = TextAlign.Center))
-        SafeText("Duration", TextStyle(Color.LightGray, m.label, textAlign = TextAlign.Center))
         BasicText(
             formatTime(state.summaryDurationSeconds),
             style = TextStyle(accent, m.metricValue, FontWeight.Bold, textAlign = TextAlign.Center),
@@ -422,7 +458,8 @@ private fun SettingsScreen(settings: AppSettings, accent: Color, save:(AppSettin
         Toggle("Spoken countdown", current.spokenCountdown, accent) { update(current.copy(spokenCountdown = it)) }
         Label("Countdown starts at"); Stepper(current.countdownStartSeconds, 5, accent) { update(current.copy(countdownStartSeconds = it.coerceIn(5, 30))) }
         Toggle("Voice commands", current.voiceCommands, accent) { update(current.copy(voiceCommands = it)) }
-        Muted("Commands are recognised continuously during exercise, rest and transitions.")
+        Toggle("Listen during exercise", current.alwaysListening, accent) { update(current.copy(alwaysListening = it)) }
+        Muted("With continuous listening off, commands are only recognised during rest, transitions and while paused.")
         Label("Training voice")
         val voices = coach.availableVoices().take(8)
         if (voices.isEmpty()) Muted("System English voice") else voices.forEach { v -> MiniButton((if (current.selectedVoiceName == v.name) "● " else "○ ") + v.name.take(26), accent) { update(current.copy(selectedVoiceName = v.name)) } }
@@ -440,6 +477,7 @@ private fun SettingsScreen(settings: AppSettings, accent: Color, save:(AppSettin
         Toggle("Record heart rate", current.recordHeartRate, accent) { update(current.copy(recordHeartRate = it)) }
         Toggle("Samsung Health sync", current.samsungHealthSync, accent) { update(current.copy(samsungHealthSync = it)) }
         Toggle("Vibration", current.vibration, accent) { update(current.copy(vibration = it)) }
+        Muted("Heart rate needs the sensor permission; the workout screen shows \"-- bpm\" while no reading is available.")
 
         Section("Appearance")
         listOf("system","blue","green","orange","red","purple","monochrome").forEach { theme -> MiniButton((if (current.accentTheme == theme) "● " else "○ ") + theme.replaceFirstChar { it.uppercase() }, accentColor(theme)) { update(current.copy(accentTheme = theme)) } }
@@ -454,9 +492,10 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
     val context = LocalContext.current
     AppColumn(horizontal = Alignment.CenterHorizontally) {
         Header("About")
+        AppLogo()
         Body("Exercise Manager", true)
         Muted("A Wear OS workout manager for timed exercises, sets, circuits, voice-guided workouts, heart-rate tracking, workout history, and Samsung Health synchronization.")
-        PrimaryButton("www.yehiashouman.com", accent) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.yehiashouman.com"))) }
+        PrimaryButton("About Author", accent) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.yehiashouman.com"))) }
         Muted("Version 1.0.0")
         SmallButton("Back", accent, onBack)
     }
@@ -480,16 +519,25 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
  * Container for the screens that must be fully visible at once. Content is centred vertically and
  * horizontally so nothing ends up under the curved edge, and it never scrolls.
  */
-@Composable private fun FixedScreen(content:@Composable ColumnScope.()->Unit) {
+@Composable private fun FixedScreen(bottomFraction: Float = 0f, content:@Composable ColumnScope.()->Unit) {
     val m = currentWatchMetrics
-    Column(
-        Modifier.fillMaxSize()
-            .padding(horizontal = m.horizontalInset / 2)
-            .padding(top = m.topInset * 0.8f, bottom = m.bottomInset * 0.8f),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(m.tightGap, Alignment.CenterVertically),
-        content = content
-    )
+    val density = LocalDensity.current
+    // A larger bottom reserve pulls the content up so wide rows never reach the lower arc.
+    val bottom = if (bottomFraction > 0f) m.height * bottomFraction else m.bottomInset * 0.8f
+    CompositionLocalProvider(
+        // The "no scrolling" guarantee has to hold with an enlarged system font size as well, so
+        // the text on these screens never grows beyond its designed size.
+        LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1f))
+    ) {
+        Column(
+            Modifier.fillMaxSize()
+                .padding(horizontal = m.horizontalInset / 2)
+                .padding(top = m.topInset * 0.8f, bottom = bottom),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(m.tightGap, Alignment.CenterVertically),
+            content = content
+        )
+    }
 }
 
 /** Single line of text kept inside the conservative safe width of a round display. */
@@ -503,19 +551,22 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 
 private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
 
-/** Compact circular workout control. Icons never wrap and stay usable while exercising. */
-@Composable private fun ControlButton(icon: ControlIcon, background: Color, tint: Color, description: String, onClick:()->Unit) {
+/**
+ * Compact circular workout control. Pause, Skip and Stop deliberately share one visual style: same
+ * diameter, same neutral background and white icons, so the row reads as a single control cluster.
+ */
+@Composable private fun ControlButton(icon: ControlIcon, description: String, onClick:()->Unit) {
     val m = currentWatchMetrics
     Box(
         Modifier
             .size(m.controlSize)
-            .background(background, CircleShape)
+            .background(ControlBackground, CircleShape)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center
     ) {
         Canvas(Modifier.size(m.controlIcon)) {
-            val color = tint
+            val color = Color.White
             val w = size.width
             val h = size.height
             when (icon) {
@@ -550,6 +601,31 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
         }
     }
 }
+
+/**
+ * Application artwork above the app name. The width is measured from the word "About" so the logo
+ * stays as small as the heading, and the square source vector keeps its aspect ratio.
+ */
+@Composable private fun AppLogo() {
+    val m = currentWatchMetrics
+    val measurer = rememberTextMeasurer()
+    val headingStyle = TextStyle(fontSize = m.heading, fontWeight = FontWeight.Bold)
+    val width = with(LocalDensity.current) {
+        measurer.measure(AnnotatedString("About"), headingStyle).size.width.toDp()
+    }
+    Image(
+        painter = painterResource(R.drawable.ic_launcher_foreground),
+        contentDescription = "Exercise Manager logo",
+        modifier = Modifier.padding(vertical = 4.dp).width(width).aspectRatio(1f)
+    )
+}
+
+/** Centred variant of [Label] for headings that must be balanced on a round display. */
+@Composable private fun CenteredLabel(text:String) = BasicText(
+    text,
+    style = TextStyle(Color.LightGray, currentWatchMetrics.label, FontWeight.Medium, textAlign = TextAlign.Center),
+    modifier = Modifier.fillMaxWidth()
+)
 
 @Composable private fun Header(text:String) = BasicText(text, style = TextStyle(Color.White, currentWatchMetrics.heading, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
 @Composable private fun Section(text:String) = BasicText(text, style = TextStyle(Color.White, currentWatchMetrics.body, FontWeight.Bold), modifier = Modifier.padding(top = 6.dp))

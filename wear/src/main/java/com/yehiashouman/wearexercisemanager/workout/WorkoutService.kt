@@ -11,7 +11,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.yehiashouman.wearexercisemanager.MainActivity
 import com.yehiashouman.wearexercisemanager.data.AppRepository
+import com.yehiashouman.wearexercisemanager.health.Haptics
 import com.yehiashouman.wearexercisemanager.health.HeartRateMonitor
+import com.yehiashouman.wearexercisemanager.health.HeartRatePermissions
 import com.yehiashouman.wearexercisemanager.shared.*
 import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.voice.VoiceCoach
@@ -48,6 +50,7 @@ class WorkoutService : Service() {
     private lateinit var voice: VoiceCoach
     private lateinit var commands: VoiceCommandListener
     private lateinit var hr: HeartRateMonitor
+    private lateinit var haptics: Haptics
     private lateinit var transfers: PhoneTransferCoordinator
 
     private var plan: List<PlannedSet> = emptyList()
@@ -59,6 +62,8 @@ class WorkoutService : Service() {
     private var paused = false
     private var pausedStageRemaining = 0
     private var intervalOpen = false
+    /** Stage the workout is really in; [WorkoutStage.PAUSED] is a UI state layered on top of it. */
+    private var activeStage = WorkoutStage.EXERCISE
     private val intervals = mutableListOf<ExerciseInterval>()
     private val heartRates = mutableListOf<HeartRateSample>()
 
@@ -72,9 +77,14 @@ class WorkoutService : Service() {
             onEnabledChanged = { active -> _state.value = _state.value.copy(listening = active) }
         )
         hr = HeartRateMonitor(applicationContext) { bpm ->
-            heartRates += HeartRateSample(System.currentTimeMillis(), bpm, paused)
-            _state.value = _state.value.copy(heartRate = bpm)
+            // A null reading means "temporarily unavailable": it is shown as "-- bpm" and never
+            // recorded, so the session average stays based on real measurements only.
+            if (bpm != null && repo.store.value.settings.recordHeartRate) {
+                heartRates += HeartRateSample(System.currentTimeMillis(), bpm, paused)
+            }
+            if (_state.value.running) _state.value = _state.value.copy(heartRate = bpm)
         }
+        haptics = Haptics(applicationContext)
         transfers = PhoneTransferCoordinator.getInstance(applicationContext)
         createNotificationChannel()
         // A watch restart is one of the moments where a phone acknowledgement may be missing.
@@ -116,8 +126,15 @@ class WorkoutService : Service() {
         sessionStart = System.currentTimeMillis()
         paused = false
         voice.applySettings(store.settings)
-        if (store.settings.recordHeartRate) hr.start()
+        // The sensor is needed for the live readout as well as for the recorded samples.
+        val heartRateWanted = store.settings.showHeartRate || store.settings.recordHeartRate
         _state.value = WorkoutUiState(running = true, presetName = found.name, totalSteps = plan.size)
+        if (heartRateWanted && !hr.start()) {
+            Log.w(
+                TAG,
+                "Heart rate unavailable (sensor=${hr.isAvailable}, permission=${HeartRatePermissions.granted(this)})"
+            )
+        }
         startCurrentSet()
     }
 
@@ -142,15 +159,16 @@ class WorkoutService : Service() {
             cycle = item.cycle,
             totalCycles = preset?.cycles ?: 1,
             remainingSeconds = item.set.durationSeconds,
-            currentStep = currentIndex + 1,
-            listening = settings.voiceCommands && commands.isAvailable
+            currentStep = currentIndex + 1
         )
+        vibrate(settings) { haptics.tick() }
         voice.speak(buildString {
             append(item.exercise.name).append(". ").append(item.set.label).append(".")
             if (item.set.reps > 0) append(" ${item.set.reps} reps.")
         }, true)
-        // Voice commands stay active during the exercise itself, not only during rest/transition.
-        activateCommands()
+        // Voice commands stay active during the exercise itself unless the user turned continuous
+        // listening off in the settings.
+        activateCommands(WorkoutStage.EXERCISE)
         runTimer(item.set.durationSeconds, WorkoutStage.EXERCISE) { completeCurrentInterval(); startRest() }
     }
 
@@ -159,8 +177,9 @@ class WorkoutService : Service() {
         val rest = item.set.restSeconds.coerceAtLeast(0)
         if (rest == 0) startTransition() else {
             _state.value = _state.value.copy(stage = WorkoutStage.REST, remainingSeconds = rest)
+            vibrate(repo.store.value.settings) { haptics.rest() }
             voice.speak("Rest.")
-            activateCommands()
+            activateCommands(WorkoutStage.REST)
             runTimer(rest, WorkoutStage.REST) { startTransition() }
         }
     }
@@ -177,7 +196,7 @@ class WorkoutService : Service() {
         val phrase = if (sameExercise) "Next set in" else "Next exercise in"
         _state.value = _state.value.copy(stage = WorkoutStage.TRANSITION, remainingSeconds = seconds)
         voice.speak("$phrase $seconds")
-        activateCommands()
+        activateCommands(WorkoutStage.TRANSITION)
         runTimer(seconds, WorkoutStage.TRANSITION, speakEverySecond = true) {
             currentIndex++
             startCurrentSet()
@@ -253,7 +272,13 @@ class WorkoutService : Service() {
         paused = true
         _state.value = _state.value.copy(paused = true, stage = WorkoutStage.PAUSED)
         voice.speak("Paused.", true)
-        commands.start()
+        vibrate(repo.store.value.settings) { haptics.tick() }
+        // While paused the microphone stays on regardless of the continuous-listening preference,
+        // otherwise the workout could not be resumed by voice.
+        if (repo.store.value.settings.voiceCommands) {
+            commands.start()
+            _state.value = _state.value.copy(listening = commands.isAvailable)
+        }
     }
 
     private fun resumeWorkout() {
@@ -261,13 +286,32 @@ class WorkoutService : Service() {
         paused = false
         _state.value = _state.value.copy(paused = false)
         voice.speak("Resuming.", true)
+        vibrate(repo.store.value.settings) { haptics.tick() }
+        activateCommands(activeStage)
         // Timer coroutine remains alive and continues from the exact remaining second.
     }
 
-    private fun activateCommands() {
-        if (!repo.store.value.settings.voiceCommands) return
+    /**
+     * Applies the voice-command settings to [stage]. Recognition is stopped instead of started when
+     * the user disabled commands, or disabled continuous listening while exercising.
+     */
+    private fun activateCommands(stage: WorkoutStage) {
+        activeStage = stage
+        val settings = repo.store.value.settings
+        val wanted = settings.voiceCommands &&
+            (settings.alwaysListening || stage != WorkoutStage.EXERCISE)
+        if (!wanted) {
+            commands.stop()
+            _state.value = _state.value.copy(listening = false)
+            return
+        }
         commands.start()
         _state.value = _state.value.copy(listening = commands.isAvailable)
+    }
+
+    /** Runs [effect] only when haptic feedback is enabled in the settings. */
+    private inline fun vibrate(settings: AppSettings, effect: () -> Unit) {
+        if (settings.vibration) effect()
     }
 
     private fun handleVoiceCommand(command: String) {
@@ -289,6 +333,8 @@ class WorkoutService : Service() {
         completeCurrentInterval()
         commands.stop()
         hr.stop()
+        val settings = repo.store.value.settings
+        vibrate(settings) { haptics.finish() }
         val p = preset ?: return
         val end = System.currentTimeMillis()
         val session = WorkoutSession(
@@ -358,7 +404,7 @@ class WorkoutService : Service() {
      */
     private fun allowedForegroundServiceTypes(): Int {
         var types = 0
-        if (hasPermission(android.Manifest.permission.BODY_SENSORS)) {
+        if (HeartRatePermissions.granted(this)) {
             types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
         }
         if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {

@@ -27,7 +27,7 @@ class WearSyncManager(context: Context) {
      * the session is confirmed exclusively by the phone acknowledgement handled in
      * [PhoneTransferCoordinator].
      */
-    suspend fun sendSession(session: WorkoutSession): Boolean = runCatching {
+    suspend fun sendSession(session: WorkoutSession, samsungHealthSync: Boolean): Boolean = runCatching {
         val path = "${WearDataPaths.SESSION_PREFIX}${session.id}"
         // A failed query is "unknown", which must not be confused with "no phone connected".
         val nodeCount = runCatching { nodeClient.connectedNodes.await().size }
@@ -37,6 +37,9 @@ class WearSyncManager(context: Context) {
         val request = PutDataMapRequest.create(path).apply {
             dataMap.putString(WearDataPaths.KEY_SESSION_JSON, json.encodeToString(session))
             dataMap.putLong(WearDataPaths.KEY_UPDATED_AT, System.currentTimeMillis())
+            // The phone owns the Samsung Health integration, so the watch preference travels with
+            // the payload instead of being duplicated in a second store.
+            dataMap.putBoolean(WearDataPaths.KEY_SAMSUNG_HEALTH_SYNC, samsungHealthSync)
         }.asPutDataRequest().setUrgent()
         client.putDataItem(request).await()
         Log.i(TAG, "DataItem created at $path (${session.intervals.size} intervals)")
