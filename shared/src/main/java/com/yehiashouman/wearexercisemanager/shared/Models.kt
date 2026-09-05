@@ -56,12 +56,13 @@ object SyncStatusSerializer : KSerializer<SyncStatus> {
 
     override fun serialize(encoder: Encoder, value: SyncStatus) = encoder.encodeString(value.name)
 
-    override fun deserialize(decoder: Decoder): SyncStatus = when (val raw = decoder.decodeString()) {
+    override fun deserialize(decoder: Decoder): SyncStatus = when (decoder.decodeString()) {
         "PENDING", "PENDING_PHONE_TRANSFER" -> SyncStatus.PENDING
         "SENDING" -> SyncStatus.SENDING
         "DELIVERED", "PHONE_RECEIVED", "SYNCED" -> SyncStatus.DELIVERED
         "FAILED" -> SyncStatus.FAILED
-        else -> SyncStatus.entries.firstOrNull { it.name == raw } ?: SyncStatus.PENDING
+        // An unknown state is treated as not yet confirmed, so it is retried instead of lost.
+        else -> SyncStatus.PENDING
     }
 }
 
@@ -76,7 +77,8 @@ fun SyncStatus.watchLabel(): String = when (this) {
 /** Phone wording: the phone is the receiver, so it never reports "Delivered". */
 fun SyncStatus.phoneLabel(): String = when (this) {
     SyncStatus.DELIVERED -> "Received"
-    else -> "Pending"
+    SyncStatus.FAILED -> "Failed"
+    SyncStatus.PENDING, SyncStatus.SENDING -> "Pending"
 }
 
 @Serializable

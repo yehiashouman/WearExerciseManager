@@ -56,7 +56,10 @@ class PhoneTransferCoordinator private constructor(context: Context) {
                 repo.markTransferStatus(session.id, SyncStatus.SENDING)
                 Log.i(TAG, "Sending session ${session.id} to the phone")
                 val accepted = sync.sendSession(session)
-                // Waiting for the phone acknowledgement, so still not delivered.
+                // A fast acknowledgement may already have arrived while the payload was written,
+                // and it must never be downgraded back to pending.
+                if (repo.sessionStatus(session.id) == SyncStatus.DELIVERED) return@withLock
+                // Otherwise the phone acknowledgement is still outstanding.
                 repo.markTransferStatus(session.id, if (accepted) SyncStatus.PENDING else SyncStatus.FAILED)
                 Log.i(
                     TAG,
@@ -87,16 +90,19 @@ class PhoneTransferCoordinator private constructor(context: Context) {
      */
     fun retryPendingTransfers() {
         scope.launch {
-            if (retryMutex.isLocked) return@launch
-            retryMutex.withLock {
+            // A retry round that is already running must not be duplicated by a second trigger.
+            if (!retryMutex.tryLock()) return@launch
+            try {
                 sync.acknowledgedSessionIds().forEach { acknowledge(it) }
-                repeat(MAX_RETRY_ROUNDS) { round ->
+                for (round in 0 until MAX_RETRY_ROUNDS) {
                     val pending = pendingSessions()
-                    if (pending.isEmpty()) return@withLock
+                    if (pending.isEmpty()) break
                     if (round > 0) delay(RETRY_BACKOFF_MS * round)
                     Log.i(TAG, "Retrying phone transfer for ${pending.size} session(s), round ${round + 1}")
                     pending.forEach { transfer(it) }
                 }
+            } finally {
+                retryMutex.unlock()
             }
         }
     }

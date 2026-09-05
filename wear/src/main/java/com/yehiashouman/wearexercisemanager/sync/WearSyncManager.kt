@@ -56,7 +56,12 @@ class WearSyncManager(context: Context) {
      * acknowledgement arrived while the watch app was not running.
      */
     suspend fun acknowledgedSessionIds(): List<String> = runCatching {
-        val uri = Uri.Builder().scheme(PutDataRequest.WEAR_URI_SCHEME).path(WearDataPaths.SESSION_ACK_PREFIX).build()
+        // The wildcard authority is required because the acknowledgements come from the phone node.
+        val uri = Uri.Builder()
+            .scheme(PutDataRequest.WEAR_URI_SCHEME)
+            .authority("*")
+            .path(WearDataPaths.SESSION_ACK_PREFIX)
+            .build()
         val buffer = client.getDataItems(uri, DataClient.FILTER_PREFIX).await()
         try {
             buffer.mapNotNull { item ->

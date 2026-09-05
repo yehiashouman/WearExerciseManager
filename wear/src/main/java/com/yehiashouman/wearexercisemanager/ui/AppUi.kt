@@ -20,6 +20,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -107,7 +109,8 @@ private fun watchMetrics(width: Dp, height: Dp): WatchMetrics {
 
 private val LocalWatchMetrics = staticCompositionLocalOf { watchMetrics(192.dp, 192.dp) }
 
-private val metrics: WatchMetrics
+/** Metrics of the display the app is currently drawn on. Only valid inside a composition. */
+private val currentWatchMetrics: WatchMetrics
     @Composable get() = LocalWatchMetrics.current
 
 @Composable
@@ -312,7 +315,7 @@ private fun WorkoutEditor(original: WorkoutPreset?, exercises: List<ExerciseDefi
 
 @Composable
 private fun ActiveWorkoutScreen(state: WorkoutUiState, accent: Color, action:(String)->Unit) {
-    val m = metrics
+    val m = currentWatchMetrics
     // Everything the athlete needs is visible at once: this screen never scrolls.
     FixedScreen {
         val stageLine = when (state.stage) {
@@ -349,19 +352,19 @@ private fun ActiveWorkoutScreen(state: WorkoutUiState, accent: Color, action:(St
         if (extras.isNotEmpty()) SafeText(extras, TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
         Row(horizontalArrangement = Arrangement.spacedBy(m.controlGap), verticalAlignment = Alignment.CenterVertically) {
             if (state.paused) {
-                ControlButton(ControlIcon.PLAY, accent, Color.Black) { action(WorkoutService.ACTION_RESUME) }
+                ControlButton(ControlIcon.PLAY, accent, Color.Black, "Resume") { action(WorkoutService.ACTION_RESUME) }
             } else {
-                ControlButton(ControlIcon.PAUSE, accent, Color.Black) { action(WorkoutService.ACTION_PAUSE) }
+                ControlButton(ControlIcon.PAUSE, accent, Color.Black, "Pause") { action(WorkoutService.ACTION_PAUSE) }
             }
-            ControlButton(ControlIcon.SKIP, Color(0xFF202020), accent) { action(WorkoutService.ACTION_SKIP) }
-            ControlButton(ControlIcon.STOP, Color(0xFF202020), Color(0xFFFF6666)) { action(WorkoutService.ACTION_STOP) }
+            ControlButton(ControlIcon.SKIP, Color(0xFF202020), accent, "Skip to next exercise") { action(WorkoutService.ACTION_SKIP) }
+            ControlButton(ControlIcon.STOP, Color(0xFF202020), Color(0xFFFF6666), "Stop workout") { action(WorkoutService.ACTION_STOP) }
         }
     }
 }
 
 @Composable
 private fun WorkoutSummaryScreen(state: WorkoutUiState, accent: Color, onDone:()->Unit) {
-    val m = metrics
+    val m = currentWatchMetrics
     // The whole summary has to be readable without scrolling, so the type scale stays modest.
     FixedScreen {
         SafeText(
@@ -460,7 +463,7 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 }
 
 @Composable private fun AppColumn(horizontal: Alignment.Horizontal = Alignment.Start, content:@Composable ColumnScope.()->Unit) {
-    val m = metrics
+    val m = currentWatchMetrics
     Column(
         Modifier.fillMaxSize().padding(horizontal = m.horizontalInset).verticalScroll(rememberScrollState()),
         horizontalAlignment = horizontal,
@@ -478,7 +481,7 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
  * horizontally so nothing ends up under the curved edge, and it never scrolls.
  */
 @Composable private fun FixedScreen(content:@Composable ColumnScope.()->Unit) {
-    val m = metrics
+    val m = currentWatchMetrics
     Column(
         Modifier.fillMaxSize().padding(
             horizontal = m.horizontalInset / 2,
@@ -503,10 +506,14 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
 
 /** Compact circular workout control. Icons never wrap and stay usable while exercising. */
-@Composable private fun ControlButton(icon: ControlIcon, background: Color, tint: Color, onClick:()->Unit) {
-    val m = metrics
+@Composable private fun ControlButton(icon: ControlIcon, background: Color, tint: Color, description: String, onClick:()->Unit) {
+    val m = currentWatchMetrics
     Box(
-        Modifier.size(m.controlSize).background(background, CircleShape).clickable(onClick = onClick),
+        Modifier
+            .size(m.controlSize)
+            .background(background, CircleShape)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
         contentAlignment = Alignment.Center
     ) {
         Canvas(Modifier.size(m.controlIcon)) {
@@ -546,13 +553,13 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
     }
 }
 
-@Composable private fun Header(text:String) = BasicText(text, style = TextStyle(Color.White, metrics.heading, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
-@Composable private fun Section(text:String) = BasicText(text, style = TextStyle(Color.White, metrics.body, FontWeight.Bold), modifier = Modifier.padding(top = 6.dp))
-@Composable private fun Label(text:String) = BasicText(text, style = TextStyle(Color.LightGray, metrics.label))
-@Composable private fun Body(text:String, bold:Boolean=false) = BasicText(text, style = TextStyle(Color.White, metrics.body, if (bold) FontWeight.Bold else FontWeight.Normal))
-@Composable private fun Muted(text:String) = BasicText(text, style = TextStyle(Color.Gray, metrics.label))
+@Composable private fun Header(text:String) = BasicText(text, style = TextStyle(Color.White, currentWatchMetrics.heading, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
+@Composable private fun Section(text:String) = BasicText(text, style = TextStyle(Color.White, currentWatchMetrics.body, FontWeight.Bold), modifier = Modifier.padding(top = 6.dp))
+@Composable private fun Label(text:String) = BasicText(text, style = TextStyle(Color.LightGray, currentWatchMetrics.label))
+@Composable private fun Body(text:String, bold:Boolean=false) = BasicText(text, style = TextStyle(Color.White, currentWatchMetrics.body, if (bold) FontWeight.Bold else FontWeight.Normal))
+@Composable private fun Muted(text:String) = BasicText(text, style = TextStyle(Color.Gray, currentWatchMetrics.label))
 
-@Composable private fun Input(value:String, onChange:(String)->Unit) { BasicTextField(value, onChange, textStyle = TextStyle(Color.White, metrics.body), singleLine = true, modifier = Modifier.fillMaxWidth().background(Color(0xFF222222), RoundedCornerShape(12.dp)).padding(9.dp)) }
+@Composable private fun Input(value:String, onChange:(String)->Unit) { BasicTextField(value, onChange, textStyle = TextStyle(Color.White, currentWatchMetrics.body), singleLine = true, modifier = Modifier.fillMaxWidth().background(Color(0xFF222222), RoundedCornerShape(12.dp)).padding(9.dp)) }
 @Composable private fun NumberInput(value:Int, onChange:(Int)->Unit) = Input(value.toString()) { onChange(it.filter(Char::isDigit).toIntOrNull() ?: 0) }
 
 @Composable private fun Card(accent:Color, content:@Composable ColumnScope.()->Unit) = Column(Modifier.fillMaxWidth().background(Color(0xFF151515), RoundedCornerShape(14.dp)).padding(horizontal = 9.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
@@ -563,7 +570,7 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
 @Composable private fun PrimaryButtonSurface(text:String, accent:Color, enabled:Boolean, modifier: Modifier, onClick:()->Unit) = Box(
     modifier.background(if(enabled) accent else Color.DarkGray, RoundedCornerShape(22.dp)).clickable(enabled = enabled, onClick = onClick).padding(9.dp),
     contentAlignment = Alignment.Center
-) { BasicText(text, style=TextStyle(Color.Black, metrics.button, FontWeight.Bold, textAlign = TextAlign.Center), maxLines = 1) }
+) { BasicText(text, style=TextStyle(Color.Black, currentWatchMetrics.button, FontWeight.Bold, textAlign = TextAlign.Center), maxLines = 1) }
 
 @Composable private fun PrimaryButton(text:String, accent:Color, enabled:Boolean=true, onClick:()->Unit) = CenteredButtonRow {
     PrimaryButtonSurface(text, accent, enabled, Modifier.fillMaxWidth(ButtonWidthFraction), onClick)
@@ -572,7 +579,7 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
 @Composable private fun SmallButtonSurface(text:String, accent:Color, modifier: Modifier, onClick:()->Unit) = Box(
     modifier.background(Color(0xFF202020), RoundedCornerShape(18.dp)).clickable(onClick=onClick).padding(9.dp),
     contentAlignment = Alignment.Center
-) { BasicText(text, style=TextStyle(if (accent == Color.White) Color.White else accent, metrics.button, FontWeight.Medium, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+) { BasicText(text, style=TextStyle(if (accent == Color.White) Color.White else accent, currentWatchMetrics.button, FontWeight.Medium, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis) }
 
 @Composable private fun SmallButton(text:String, accent:Color, onClick:()->Unit) = CenteredButtonRow {
     SmallButtonSurface(text, accent, Modifier.fillMaxWidth(ButtonWidthFraction), onClick)
@@ -581,14 +588,14 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
 @Composable private fun MiniButton(text:String, accent:Color, onClick:()->Unit) = Box(
     Modifier.background(Color(0xFF242424), RoundedCornerShape(14.dp)).clickable(onClick=onClick).padding(horizontal=6.dp, vertical=6.dp),
     contentAlignment = Alignment.Center
-) { BasicText(text, style=TextStyle(accent, metrics.label, FontWeight.Medium, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+) { BasicText(text, style=TextStyle(accent, currentWatchMetrics.label, FontWeight.Medium, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis) }
 @Composable private fun Toggle(label:String, value:Boolean, accent:Color, onChange:(Boolean)->Unit) = SmallButton((if(value) "● " else "○ ") + label, accent) { onChange(!value) }
 
 @Composable private fun Stepper(value:Int, step:Int, accent:Color, suffix:String=" sec", onChange:(Int)->Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         MiniButton("−", accent) { onChange(value-step) }
         Input(value.toString()) { onChange(it.filter(Char::isDigit).toIntOrNull() ?: value) }
-        BasicText("$value$suffix", style=TextStyle(Color.White, metrics.label, FontWeight.Bold), maxLines = 1)
+        BasicText("$value$suffix", style=TextStyle(Color.White, currentWatchMetrics.label, FontWeight.Bold), maxLines = 1)
         MiniButton("+", accent) { onChange(value+step) }
     }
 }
