@@ -281,10 +281,7 @@ class WorkoutService : Service() {
         vibrate(repo.store.value.settings) { haptics.tick() }
         // While paused the microphone stays on regardless of the continuous-listening preference,
         // otherwise the workout could not be resumed by voice.
-        if (repo.store.value.settings.voiceCommands) {
-            commands.start()
-            _state.value = _state.value.copy(listening = commands.isAvailable)
-        }
+        activateCommands(WorkoutStage.PAUSED)
     }
 
     private fun resumeWorkout() {
@@ -302,7 +299,8 @@ class WorkoutService : Service() {
      * the user disabled commands, or disabled continuous listening while exercising.
      */
     private fun activateCommands(stage: WorkoutStage) {
-        activeStage = stage
+        // Pause is a UI state on top of the real stage, so it must not overwrite what to resume to.
+        if (stage != WorkoutStage.PAUSED) activeStage = stage
         val settings = repo.store.value.settings
         val wanted = settings.voiceCommands &&
             (settings.alwaysListening || stage != WorkoutStage.EXERCISE)

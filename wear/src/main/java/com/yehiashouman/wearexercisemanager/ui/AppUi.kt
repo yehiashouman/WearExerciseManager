@@ -622,8 +622,10 @@ private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
     val m = currentWatchMetrics
     val measurer = rememberTextMeasurer()
     val headingStyle = TextStyle(fontSize = m.heading, fontWeight = FontWeight.Bold)
-    val width = with(LocalDensity.current) {
-        measurer.measure(AnnotatedString("About"), headingStyle).size.width.toDp()
+    val density = LocalDensity.current
+    // Measuring is layout work, so the result is cached until the type scale or density changes.
+    val width = remember(measurer, headingStyle, density) {
+        with(density) { measurer.measure(AnnotatedString("About"), headingStyle).size.width.toDp() }
     }
     Image(
         // The artwork lives in the shared module; with a non-transitive R class it has to be
