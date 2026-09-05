@@ -18,8 +18,11 @@ class WearSyncManager(context: Context) {
 
     suspend fun sendSession(session: WorkoutSession): Boolean = runCatching {
         val path = "${WearDataPaths.SESSION_PREFIX}${session.id}"
-        val nodes = runCatching { nodeClient.connectedNodes.await() }.getOrDefault(emptyList())
-        Log.i(TAG, "Attempting phone transfer of session ${session.id} to ${nodes.size} connected node(s)")
+        // A failed query is "unknown", which must not be confused with "no phone connected".
+        val nodeCount = runCatching { nodeClient.connectedNodes.await().size }
+            .onFailure { Log.w(TAG, "Could not query connected nodes", it) }
+            .getOrNull()
+        Log.i(TAG, "Attempting phone transfer of session ${session.id} to ${nodeCount ?: "unknown"} connected node(s)")
         val request = PutDataMapRequest.create(path).apply {
             dataMap.putString("session_json", json.encodeToString(session))
             dataMap.putLong("updated_at", System.currentTimeMillis())
@@ -28,7 +31,7 @@ class WearSyncManager(context: Context) {
         Log.i(TAG, "DataItem created at $path (${session.intervals.size} intervals)")
         // The data item is written locally even without a peer, so an empty node list means the
         // session has not reached the phone yet and must stay pending for a later retry.
-        if (nodes.isEmpty()) {
+        if (nodeCount == 0) {
             Log.w(TAG, "No connected phone node; session ${session.id} stays pending")
             false
         } else {

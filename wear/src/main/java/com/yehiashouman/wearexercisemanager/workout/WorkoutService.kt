@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 
 class WorkoutService : Service() {
     companion object {
@@ -48,7 +49,7 @@ class WorkoutService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val transferMutex = Mutex()
-    private val transfersInFlight = mutableSetOf<String>()
+    private val transfersInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private lateinit var repo: AppRepository
     private lateinit var voice: VoiceCoach
     private lateinit var commands: VoiceCommandListener

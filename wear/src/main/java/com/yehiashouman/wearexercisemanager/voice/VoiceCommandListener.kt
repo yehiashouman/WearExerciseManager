@@ -36,6 +36,15 @@ class VoiceCommandListener(
     private val handler = Handler(Looper.getMainLooper())
     private val restart = Runnable { beginListening() }
 
+    /** Recovers if the recognizer never reports a result or an error for a started session. */
+    private val watchdog = Runnable {
+        if (!listening) return@Runnable
+        Log.w(TAG, "Recognition session produced no callback, restarting")
+        listening = false
+        runCatching { recognizer?.cancel() }
+        beginListening()
+    }
+
     /** True while the caller wants commands to be recognised, independent of recognizer restarts. */
     private var enabled = false
     private var listening = false
@@ -62,6 +71,7 @@ class VoiceCommandListener(
         listening = false
         if (wasEnabled) onEnabledChanged(false)
         handler.removeCallbacks(restart)
+        handler.removeCallbacks(watchdog)
         runCatching { recognizer?.cancel() }
     }
 
@@ -80,6 +90,7 @@ class VoiceCommandListener(
             scheduleRestart(RESTART_BACKOFF_MS)
         } else {
             listening = true
+            handler.postDelayed(watchdog, SESSION_TIMEOUT_MS)
         }
     }
 
@@ -87,6 +98,7 @@ class VoiceCommandListener(
         if (!enabled) return
         enabled = false
         handler.removeCallbacks(restart)
+        handler.removeCallbacks(watchdog)
         onEnabledChanged(false)
     }
 
@@ -100,6 +112,7 @@ class VoiceCommandListener(
 
     override fun onResults(results: Bundle?) {
         listening = false
+        handler.removeCallbacks(watchdog)
         consecutiveErrors = 0
         handle(results)
         scheduleRestart(RESTART_DELAY_MS)
@@ -133,6 +146,7 @@ class VoiceCommandListener(
 
     override fun onError(error: Int) {
         listening = false
+        handler.removeCallbacks(watchdog)
         when (error) {
             SpeechRecognizer.ERROR_NO_MATCH,
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
@@ -163,6 +177,7 @@ class VoiceCommandListener(
         const val RESTART_DELAY_MS = 400L
         const val RESTART_BACKOFF_MS = 1_500L
         const val MAX_CONSECUTIVE_ERRORS = 5
+        const val SESSION_TIMEOUT_MS = 20_000L
     }
 }
 
