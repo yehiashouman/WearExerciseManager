@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="Exercise Manager Companion" android:theme="@style/Theme.ExerciseManager.Mobile">
+    <application
+        android:label="Exercise Manager Companion"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/Theme.ExerciseManager.Mobile">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

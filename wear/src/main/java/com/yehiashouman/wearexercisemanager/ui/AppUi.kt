@@ -2,10 +2,12 @@ package com.yehiashouman.wearexercisemanager.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
@@ -13,15 +15,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yehiashouman.wearexercisemanager.AppViewModel
 import com.yehiashouman.wearexercisemanager.shared.*
+import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.voice.VoiceCoach
 import com.yehiashouman.wearexercisemanager.workout.WorkoutService
 import com.yehiashouman.wearexercisemanager.workout.WorkoutStage
@@ -35,10 +44,71 @@ private enum class Screen { HOME, EXERCISES, EXERCISE_EDIT, WORKOUTS, WORKOUT_ED
 /** Fraction of the available width used by the main buttons. */
 private const val ButtonWidthFraction = 0.70f
 
-/** Insets that keep content inside the visually safe circular area of a round watch display. */
-private val ScreenHorizontalInset = 16.dp
-private val ScreenTopInset = 24.dp
-private val ScreenBottomInset = 28.dp
+/**
+ * Fraction of the width that stays readable next to the top and bottom of a round display, where
+ * the circular glass cuts the rectangular layout box.
+ */
+private const val SafeWidthFraction = 0.78f
+
+/**
+ * Screen dependent metrics so the layout adapts to the actual round display instead of relying on
+ * dimensions that only fit a single device.
+ */
+private data class WatchMetrics(
+    val width: Dp,
+    val height: Dp,
+    val horizontalInset: Dp,
+    val topInset: Dp,
+    val bottomInset: Dp,
+    val gap: Dp,
+    val tightGap: Dp,
+    val timer: TextUnit,
+    val metricValue: TextUnit,
+    val heading: TextUnit,
+    val title: TextUnit,
+    val body: TextUnit,
+    val label: TextUnit,
+    val button: TextUnit,
+    val controlSize: Dp,
+    val controlGap: Dp,
+    val controlIcon: Dp
+)
+
+private fun watchMetrics(width: Dp, height: Dp): WatchMetrics {
+    val shortest = if (width < height) width else height
+    // 192dp is the classic round baseline; larger watches scale up moderately.
+    val scale = (shortest.value / 192f).coerceIn(0.85f, 1.25f)
+    fun sp(base: Float, min: Float, max: Float) = (base * scale).coerceIn(min, max).sp
+    val controlGap = (8f * scale).coerceIn(6f, 10f)
+    // Three equally sized controls plus their gaps have to fit the usable width of the display.
+    val control = ((width.value * 0.90f - 2f * controlGap) / 3f).coerceIn(46f, 60f)
+    return WatchMetrics(
+        width = width,
+        height = height,
+        // The curved edge eats roughly a tenth of the rectangular width on each side.
+        horizontalInset = (width.value * 0.09f).coerceIn(12f, 26f).dp,
+        topInset = (height.value * 0.07f).coerceIn(10f, 22f).dp,
+        bottomInset = (height.value * 0.08f).coerceIn(12f, 26f).dp,
+        gap = (5f * scale).coerceIn(3f, 8f).dp,
+        // Screens that must not scroll use the tighter rhythm.
+        tightGap = (3f * scale).coerceIn(2f, 6f).dp,
+        timer = sp(29f, 28f, 34f),
+        metricValue = sp(26f, 23f, 30f),
+        heading = sp(19f, 18f, 24f),
+        title = sp(17f, 16f, 22f),
+        body = sp(14f, 13f, 17f),
+        label = sp(12f, 11f, 15f),
+        button = sp(14f, 13f, 16f),
+        controlSize = control.dp,
+        controlGap = controlGap.dp,
+        controlIcon = (control * 0.45f).dp
+    )
+}
+
+private val LocalWatchMetrics = staticCompositionLocalOf { watchMetrics(192.dp, 192.dp) }
+
+private val metrics: WatchMetrics
+    @Composable get() = LocalWatchMetrics.current
 
 @Composable
 fun ExerciseManagerApp(
@@ -52,6 +122,12 @@ fun ExerciseManagerApp(
     var editingExercise by remember { mutableStateOf<ExerciseDefinition?>(null) }
     var editingWorkout by remember { mutableStateOf<WorkoutPreset?>(null) }
     val accent = accentColor(store.settings.accentTheme)
+    val context = LocalContext.current
+
+    LaunchedEffect(screen) {
+        // Opening History is a natural moment to re-attempt the sessions the phone never confirmed.
+        if (screen == Screen.HISTORY) PhoneTransferCoordinator.getInstance(context).retryPendingTransfers()
+    }
 
     LaunchedEffect(workout.running, workout.completed, workout.stopped) {
         when {
@@ -118,7 +194,14 @@ fun ExerciseManagerApp(
 
 @Composable
 private fun AppFrame(accent: Color, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.Black).padding(horizontal = ScreenHorizontalInset)) { content() }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val screen = remember(maxWidth, maxHeight) { watchMetrics(maxWidth, maxHeight) }
+        CompositionLocalProvider(LocalWatchMetrics provides screen) {
+            // Insets are applied per screen: a scrolling list needs more of them than a centred
+            // layout that already keeps its content inside the safe width.
+            Box(Modifier.fillMaxSize()) { content() }
+        }
+    }
 }
 
 @Composable
@@ -229,41 +312,82 @@ private fun WorkoutEditor(original: WorkoutPreset?, exercises: List<ExerciseDefi
 
 @Composable
 private fun ActiveWorkoutScreen(state: WorkoutUiState, accent: Color, action:(String)->Unit) {
-    AppColumn(horizontal = Alignment.CenterHorizontally) {
-        if (state.paused) Header("PAUSED") else Header(state.exerciseName.ifBlank { state.presetName })
-        Body(state.setLabel, true)
-        if (state.reps > 0) Muted("${state.reps} reps")
-        BasicText(formatTime(state.remainingSeconds), style = TextStyle(color = accent, fontSize = 42.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth())
-        Body(when (state.stage) { WorkoutStage.REST -> "REST"; WorkoutStage.TRANSITION -> "GET READY"; WorkoutStage.PAUSED -> "Paused"; else -> "Cycle ${state.cycle} of ${state.totalCycles}" }, true)
-        state.heartRate?.let { Body("♥ ${it.toInt()} bpm") }
-        Muted("Step ${state.currentStep} / ${state.totalSteps}${if (state.listening) "  •  Listening" else ""}")
-        CenteredButtonRow {
-            Row(Modifier.fillMaxWidth(ButtonWidthFraction), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (state.paused) PrimaryButtonSurface("Resume", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_RESUME) }
-                else PrimaryButtonSurface("Pause", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_PAUSE) }
-                PrimaryButtonSurface("Skip", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_SKIP) }
+    val m = metrics
+    // Everything the athlete needs is visible at once: this screen never scrolls.
+    FixedScreen {
+        val stageLine = when (state.stage) {
+            WorkoutStage.REST -> "REST"
+            WorkoutStage.TRANSITION -> "GET READY"
+            WorkoutStage.PAUSED -> "PAUSED"
+            else -> buildString {
+                append(state.setLabel)
+                if (state.reps > 0) { if (isNotEmpty()) append(" • "); append("${state.reps} reps") }
             }
         }
-        SmallButton("Stop", accent) { action(WorkoutService.ACTION_STOP) }
+        SafeText(
+            state.exerciseName.ifBlank { state.presetName },
+            TextStyle(Color.White, m.title, FontWeight.Bold, textAlign = TextAlign.Center)
+        )
+        if (stageLine.isNotBlank()) SafeText(
+            stageLine,
+            TextStyle(if (state.paused) accent else Color.LightGray, m.label, FontWeight.Medium, textAlign = TextAlign.Center)
+        )
+        BasicText(
+            formatTime(state.remainingSeconds),
+            style = TextStyle(accent, m.timer, FontWeight.Bold, textAlign = TextAlign.Center),
+            maxLines = 1,
+            modifier = Modifier.fillMaxWidth()
+        )
+        SafeText(
+            "Cycle ${state.cycle}/${state.totalCycles} • Step ${state.currentStep}/${state.totalSteps}",
+            TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center)
+        )
+        val extras = buildString {
+            state.heartRate?.let { append("♥ ${it.toInt()} bpm") }
+            if (state.listening) { if (isNotEmpty()) append("  •  "); append("Listening") }
+        }
+        if (extras.isNotEmpty()) SafeText(extras, TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
+        Row(horizontalArrangement = Arrangement.spacedBy(m.controlGap), verticalAlignment = Alignment.CenterVertically) {
+            if (state.paused) {
+                ControlButton(ControlIcon.PLAY, accent, Color.Black) { action(WorkoutService.ACTION_RESUME) }
+            } else {
+                ControlButton(ControlIcon.PAUSE, accent, Color.Black) { action(WorkoutService.ACTION_PAUSE) }
+            }
+            ControlButton(ControlIcon.SKIP, Color(0xFF202020), accent) { action(WorkoutService.ACTION_SKIP) }
+            ControlButton(ControlIcon.STOP, Color(0xFF202020), Color(0xFFFF6666)) { action(WorkoutService.ACTION_STOP) }
+        }
     }
 }
 
 @Composable
 private fun WorkoutSummaryScreen(state: WorkoutUiState, accent: Color, onDone:()->Unit) {
-    AppColumn(horizontal = Alignment.CenterHorizontally) {
-        Header(if (state.completed) "Workout Complete" else "Workout Stopped")
-        Body(state.presetName, true)
-        Label("Duration")
-        BasicText(formatTime(state.summaryDurationSeconds), style = TextStyle(accent, 28.sp, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth())
-        Body("${state.summaryIntervals} intervals completed")
-        state.summaryAverageHeartRate?.let { Body("♥ Avg ${it.toInt()} bpm") }
-        PrimaryButton("Done", accent, onClick = onDone)
+    val m = metrics
+    // The whole summary has to be readable without scrolling, so the type scale stays modest.
+    FixedScreen {
+        SafeText(
+            if (state.completed) "Workout Complete" else "Workout Stopped",
+            TextStyle(Color.White, m.heading, FontWeight.Bold, textAlign = TextAlign.Center)
+        )
+        SafeText(state.presetName, TextStyle(Color.White, m.body, FontWeight.Bold, textAlign = TextAlign.Center))
+        SafeText("Duration", TextStyle(Color.LightGray, m.label, textAlign = TextAlign.Center))
+        BasicText(
+            formatTime(state.summaryDurationSeconds),
+            style = TextStyle(accent, m.metricValue, FontWeight.Bold, textAlign = TextAlign.Center),
+            maxLines = 1,
+            modifier = Modifier.fillMaxWidth()
+        )
+        SafeText("${state.summaryIntervals} intervals completed", TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
+        state.summaryAverageHeartRate?.let {
+            SafeText("♥ Avg ${it.toInt()} bpm", TextStyle(Color.Gray, m.label, textAlign = TextAlign.Center))
+        }
+        PrimaryButtonSurface("Done", accent, true, Modifier.fillMaxWidth(0.55f), onDone)
     }
 }
 
 @Composable
 private fun HistoryScreen(history: List<WorkoutSession>, accent: Color, onBack:()->Unit, onClear:()->Unit) {
     val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
+    // History legitimately grows, so this screen keeps its scrolling behaviour.
     AppColumn {
         Header("History")
         if (history.isEmpty()) Muted("No workouts recorded")
@@ -271,10 +395,10 @@ private fun HistoryScreen(history: List<WorkoutSession>, accent: Color, onBack:(
             Body(s.presetName, true)
             Muted(fmt.format(Date(s.startedAtEpochMs)))
             val seconds = s.intervals.sumOf { it.activeDurationSeconds }
-            Muted("${seconds / 60} min active • ${s.intervals.size} intervals")
+            Muted("${formatActiveDuration(seconds)} • ${s.intervals.size} intervals")
             val avg = s.heartRates.filterNot { it.paused }.map { it.bpm }.average()
             if (!avg.isNaN()) Muted("Avg HR ${avg.toInt()} bpm")
-            Muted("Phone transfer: ${s.syncStatus.displayLabel()}")
+            Muted("Phone transfer: ${s.syncStatus.watchLabel()}")
         } }
         if (history.isNotEmpty()) SmallButton("Clear History", accent, onClear)
         SmallButton("Back", accent, onBack)
@@ -336,35 +460,110 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 }
 
 @Composable private fun AppColumn(horizontal: Alignment.Horizontal = Alignment.Start, content:@Composable ColumnScope.()->Unit) {
+    val m = metrics
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        Modifier.fillMaxSize().padding(horizontal = m.horizontalInset).verticalScroll(rememberScrollState()),
         horizontalAlignment = horizontal,
-        verticalArrangement = Arrangement.spacedBy(7.dp)
+        verticalArrangement = Arrangement.spacedBy(m.gap + 1.dp)
     ) {
         // Round displays clip the corners, so the first and last items need extra breathing room.
-        Spacer(Modifier.height(ScreenTopInset))
+        Spacer(Modifier.height(m.topInset + m.gap))
         content()
-        Spacer(Modifier.height(ScreenBottomInset))
+        Spacer(Modifier.height(m.bottomInset + m.gap))
     }
 }
-@Composable private fun Header(text:String) = BasicText(text, style = TextStyle(Color.White, 20.sp, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp))
-@Composable private fun Section(text:String) = BasicText(text, style = TextStyle(Color.White, 16.sp, FontWeight.Bold), modifier = Modifier.padding(top = 8.dp))
-@Composable private fun Label(text:String) = BasicText(text, style = TextStyle(Color.LightGray, 11.sp))
-@Composable private fun Body(text:String, bold:Boolean=false) = BasicText(text, style = TextStyle(Color.White, 14.sp, if (bold) FontWeight.Bold else FontWeight.Normal))
-@Composable private fun Muted(text:String) = BasicText(text, style = TextStyle(Color.Gray, 11.sp))
 
-@Composable private fun Input(value:String, onChange:(String)->Unit) { BasicTextField(value, onChange, textStyle = TextStyle(Color.White, 14.sp), singleLine = true, modifier = Modifier.fillMaxWidth().background(Color(0xFF222222), RoundedCornerShape(12.dp)).padding(10.dp)) }
+/**
+ * Container for the screens that must be fully visible at once. Content is centred vertically and
+ * horizontally so nothing ends up under the curved edge, and it never scrolls.
+ */
+@Composable private fun FixedScreen(content:@Composable ColumnScope.()->Unit) {
+    val m = metrics
+    Column(
+        Modifier.fillMaxSize().padding(
+            horizontal = m.horizontalInset / 2,
+            top = m.topInset * 0.8f,
+            bottom = m.bottomInset * 0.8f
+        ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(m.tightGap, Alignment.CenterVertically),
+        content = content
+    )
+}
+
+/** Single line of text kept inside the conservative safe width of a round display. */
+@Composable private fun ColumnScope.SafeText(text:String, style: TextStyle) = BasicText(
+    text,
+    style = style,
+    maxLines = 1,
+    overflow = TextOverflow.Ellipsis,
+    modifier = Modifier.fillMaxWidth(SafeWidthFraction)
+)
+
+private enum class ControlIcon { PAUSE, PLAY, SKIP, STOP }
+
+/** Compact circular workout control. Icons never wrap and stay usable while exercising. */
+@Composable private fun ControlButton(icon: ControlIcon, background: Color, tint: Color, onClick:()->Unit) {
+    val m = metrics
+    Box(
+        Modifier.size(m.controlSize).background(background, CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.size(m.controlIcon)) {
+            val color = tint
+            val w = size.width
+            val h = size.height
+            when (icon) {
+                ControlIcon.PAUSE -> {
+                    val barWidth = w * 0.28f
+                    drawRect(color, Offset(w * 0.08f, 0f), Size(barWidth, h))
+                    drawRect(color, Offset(w - barWidth - w * 0.08f, 0f), Size(barWidth, h))
+                }
+                ControlIcon.PLAY -> drawPath(
+                    Path().apply {
+                        moveTo(w * 0.12f, 0f)
+                        lineTo(w * 0.12f, h)
+                        lineTo(w * 0.95f, h / 2f)
+                        close()
+                    },
+                    color
+                )
+                ControlIcon.SKIP -> {
+                    drawPath(
+                        Path().apply {
+                            moveTo(0f, 0f)
+                            lineTo(0f, h)
+                            lineTo(w * 0.68f, h / 2f)
+                            close()
+                        },
+                        color
+                    )
+                    drawRect(color, Offset(w * 0.78f, 0f), Size(w * 0.22f, h))
+                }
+                ControlIcon.STOP -> drawRect(color, Offset(w * 0.08f, h * 0.08f), Size(w * 0.84f, h * 0.84f))
+            }
+        }
+    }
+}
+
+@Composable private fun Header(text:String) = BasicText(text, style = TextStyle(Color.White, metrics.heading, FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
+@Composable private fun Section(text:String) = BasicText(text, style = TextStyle(Color.White, metrics.body, FontWeight.Bold), modifier = Modifier.padding(top = 6.dp))
+@Composable private fun Label(text:String) = BasicText(text, style = TextStyle(Color.LightGray, metrics.label))
+@Composable private fun Body(text:String, bold:Boolean=false) = BasicText(text, style = TextStyle(Color.White, metrics.body, if (bold) FontWeight.Bold else FontWeight.Normal))
+@Composable private fun Muted(text:String) = BasicText(text, style = TextStyle(Color.Gray, metrics.label))
+
+@Composable private fun Input(value:String, onChange:(String)->Unit) { BasicTextField(value, onChange, textStyle = TextStyle(Color.White, metrics.body), singleLine = true, modifier = Modifier.fillMaxWidth().background(Color(0xFF222222), RoundedCornerShape(12.dp)).padding(9.dp)) }
 @Composable private fun NumberInput(value:Int, onChange:(Int)->Unit) = Input(value.toString()) { onChange(it.filter(Char::isDigit).toIntOrNull() ?: 0) }
 
-@Composable private fun Card(accent:Color, content:@Composable ColumnScope.()->Unit) = Column(Modifier.fillMaxWidth().background(Color(0xFF151515), RoundedCornerShape(14.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp), content = content)
+@Composable private fun Card(accent:Color, content:@Composable ColumnScope.()->Unit) = Column(Modifier.fillMaxWidth().background(Color(0xFF151515), RoundedCornerShape(14.dp)).padding(horizontal = 9.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
 
 /** Centers a button that only uses [ButtonWidthFraction] of the available width. */
 @Composable private fun CenteredButtonRow(content:@Composable ()->Unit) = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { content() }
 
 @Composable private fun PrimaryButtonSurface(text:String, accent:Color, enabled:Boolean, modifier: Modifier, onClick:()->Unit) = Box(
-    modifier.background(if(enabled) accent else Color.DarkGray, RoundedCornerShape(22.dp)).clickable(enabled = enabled, onClick = onClick).padding(11.dp),
+    modifier.background(if(enabled) accent else Color.DarkGray, RoundedCornerShape(22.dp)).clickable(enabled = enabled, onClick = onClick).padding(9.dp),
     contentAlignment = Alignment.Center
-) { BasicText(text, style=TextStyle(Color.Black, 14.sp, FontWeight.Bold, textAlign = TextAlign.Center)) }
+) { BasicText(text, style=TextStyle(Color.Black, metrics.button, FontWeight.Bold, textAlign = TextAlign.Center), maxLines = 1) }
 
 @Composable private fun PrimaryButton(text:String, accent:Color, enabled:Boolean=true, onClick:()->Unit) = CenteredButtonRow {
     PrimaryButtonSurface(text, accent, enabled, Modifier.fillMaxWidth(ButtonWidthFraction), onClick)
@@ -373,7 +572,7 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 @Composable private fun SmallButtonSurface(text:String, accent:Color, modifier: Modifier, onClick:()->Unit) = Box(
     modifier.background(Color(0xFF202020), RoundedCornerShape(18.dp)).clickable(onClick=onClick).padding(9.dp),
     contentAlignment = Alignment.Center
-) { BasicText(text, style=TextStyle(if (accent == Color.White) Color.White else accent, 13.sp, FontWeight.Medium, textAlign = TextAlign.Center)) }
+) { BasicText(text, style=TextStyle(if (accent == Color.White) Color.White else accent, metrics.button, FontWeight.Medium, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis) }
 
 @Composable private fun SmallButton(text:String, accent:Color, onClick:()->Unit) = CenteredButtonRow {
     SmallButtonSurface(text, accent, Modifier.fillMaxWidth(ButtonWidthFraction), onClick)
@@ -382,20 +581,24 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 @Composable private fun MiniButton(text:String, accent:Color, onClick:()->Unit) = Box(
     Modifier.background(Color(0xFF242424), RoundedCornerShape(14.dp)).clickable(onClick=onClick).padding(horizontal=6.dp, vertical=6.dp),
     contentAlignment = Alignment.Center
-) { BasicText(text, style=TextStyle(accent, 11.sp, FontWeight.Medium, textAlign = TextAlign.Center)) }
+) { BasicText(text, style=TextStyle(accent, metrics.label, FontWeight.Medium, textAlign = TextAlign.Center), maxLines = 2, overflow = TextOverflow.Ellipsis) }
 @Composable private fun Toggle(label:String, value:Boolean, accent:Color, onChange:(Boolean)->Unit) = SmallButton((if(value) "● " else "○ ") + label, accent) { onChange(!value) }
 
 @Composable private fun Stepper(value:Int, step:Int, accent:Color, suffix:String=" sec", onChange:(Int)->Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         MiniButton("−", accent) { onChange(value-step) }
         Input(value.toString()) { onChange(it.filter(Char::isDigit).toIntOrNull() ?: value) }
-        BasicText("$value$suffix", style=TextStyle(Color.White, 13.sp, FontWeight.Bold))
+        BasicText("$value$suffix", style=TextStyle(Color.White, metrics.label, FontWeight.Bold), maxLines = 1)
         MiniButton("+", accent) { onChange(value+step) }
     }
 }
 
 private fun <T> List<T>.replace(index:Int, item:T) = toMutableList().also { it[index]=item }.toList()
 private fun formatTime(seconds:Int) = "%02d:%02d".format(seconds / 60, seconds % 60)
+
+/** Sub-minute workouts show seconds so a short session is never reported as "0 min active". */
+private fun formatActiveDuration(seconds:Int) =
+    if (seconds < 60) "$seconds sec active" else "${seconds / 60} min active"
 private fun accentColor(name:String) = when(name) { "green"->Color(0xFF55DD88); "orange"->Color(0xFFFFA64D); "red"->Color(0xFFFF6666); "purple"->Color(0xFFBB86FC); "monochrome"->Color.White; else->Color(0xFF63B3FF) }
 private fun iconGlyph(key:String) = when(key) { "strength"->"◆"; "legs"->"▲"; "core"->"●"; "cardio"->"♥"; "run"->"➤"; "walk"->"•"; "cycle"->"○"; else->"◇" }
 private fun catalogItems() = listOf(

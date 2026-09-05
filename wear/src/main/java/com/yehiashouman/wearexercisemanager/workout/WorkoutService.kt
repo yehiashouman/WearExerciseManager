@@ -13,16 +13,13 @@ import com.yehiashouman.wearexercisemanager.MainActivity
 import com.yehiashouman.wearexercisemanager.data.AppRepository
 import com.yehiashouman.wearexercisemanager.health.HeartRateMonitor
 import com.yehiashouman.wearexercisemanager.shared.*
-import com.yehiashouman.wearexercisemanager.sync.WearSyncManager
+import com.yehiashouman.wearexercisemanager.sync.PhoneTransferCoordinator
 import com.yehiashouman.wearexercisemanager.voice.VoiceCoach
 import com.yehiashouman.wearexercisemanager.voice.VoiceCommandListener
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.ConcurrentHashMap
 
 class WorkoutService : Service() {
     companion object {
@@ -36,7 +33,6 @@ class WorkoutService : Service() {
         const val EXTRA_PRESET_ID = "preset_id"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "WorkoutService"
-        private const val MAX_PENDING_RETRIES = 5
 
         private val _state = MutableStateFlow(WorkoutUiState())
         val state: StateFlow<WorkoutUiState> = _state.asStateFlow()
@@ -48,13 +44,11 @@ class WorkoutService : Service() {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val transferMutex = Mutex()
-    private val transfersInFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private lateinit var repo: AppRepository
     private lateinit var voice: VoiceCoach
     private lateinit var commands: VoiceCommandListener
     private lateinit var hr: HeartRateMonitor
-    private lateinit var sync: WearSyncManager
+    private lateinit var transfers: PhoneTransferCoordinator
 
     private var plan: List<PlannedSet> = emptyList()
     private var preset: WorkoutPreset? = null
@@ -81,9 +75,10 @@ class WorkoutService : Service() {
             heartRates += HeartRateSample(System.currentTimeMillis(), bpm, paused)
             _state.value = _state.value.copy(heartRate = bpm)
         }
-        sync = WearSyncManager(applicationContext)
+        transfers = PhoneTransferCoordinator.getInstance(applicationContext)
         createNotificationChannel()
-        retryPendingPhoneTransfers()
+        // A watch restart is one of the moments where a phone acknowledgement may be missing.
+        transfers.retryPendingTransfers()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -304,7 +299,7 @@ class WorkoutService : Service() {
             status = status,
             intervals = intervals.toList(),
             heartRates = heartRates.toList(),
-            syncStatus = SyncStatus.PENDING_PHONE_TRANSFER
+            syncStatus = SyncStatus.PENDING
         )
         repo.addSession(session)
         Log.i(TAG, "Workout ${status.name.lowercase()} - session ${session.id} saved locally with ${session.intervals.size} intervals")
@@ -328,37 +323,10 @@ class WorkoutService : Service() {
 
     /**
      * Watch-to-phone transfer is independent of Samsung Health synchronization, which happens on
-     * the phone. A failed transfer keeps the session locally so it can be retried later.
+     * the phone. The session stays pending until the phone acknowledges it, so a failed transfer
+     * is simply retried later.
      */
-    private suspend fun transferToPhone(session: WorkoutSession) {
-        // Transfers are serialized so a retry and a just-finished workout cannot send the same
-        // session twice or race each other's markSynced() writes.
-        if (!transfersInFlight.add(session.id)) return
-        try {
-            transferMutex.withLock {
-                Log.i(TAG, "Attempting phone transfer for session ${session.id}")
-                val delivered = sync.sendSession(session)
-                repo.markSynced(session.id, if (delivered) SyncStatus.PHONE_RECEIVED else SyncStatus.PENDING_PHONE_TRANSFER)
-                val message = if (delivered) "Phone transfer succeeded for session ${session.id}"
-                    else "Phone transfer failed for session ${session.id}; kept locally as pending"
-                Log.i(TAG, message)
-            }
-        } finally {
-            transfersInFlight -= session.id
-        }
-    }
-
-    private fun retryPendingPhoneTransfers() {
-        scope.launch {
-            val pending = repo.store.value.history
-                .filter { it.syncStatus == SyncStatus.PENDING || it.syncStatus == SyncStatus.PENDING_PHONE_TRANSFER }
-                .sortedByDescending { it.endedAtEpochMs }
-                .take(MAX_PENDING_RETRIES)
-            if (pending.isEmpty()) return@launch
-            Log.i(TAG, "Retrying phone transfer for ${pending.size} pending session(s)")
-            pending.forEach { transferToPhone(it) }
-        }
-    }
+    private suspend fun transferToPhone(session: WorkoutSession) = transfers.transfer(session)
 
     private fun startForegroundCompat(): Boolean {
         val types = if (Build.VERSION.SDK_INT >= 34) allowedForegroundServiceTypes() else 0
