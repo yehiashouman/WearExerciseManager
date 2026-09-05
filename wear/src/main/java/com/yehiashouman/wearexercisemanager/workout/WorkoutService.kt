@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.yehiashouman.wearexercisemanager.MainActivity
@@ -31,6 +32,7 @@ class WorkoutService : Service() {
         const val ACTION_STOP = "workout.stop"
         const val EXTRA_PRESET_ID = "preset_id"
         private const val NOTIFICATION_ID = 1001
+        private const val TAG = "WorkoutService"
 
         private val _state = MutableStateFlow(WorkoutUiState())
         val state: StateFlow<WorkoutUiState> = _state.asStateFlow()
@@ -294,21 +296,24 @@ class WorkoutService : Service() {
     }
 
     private fun startForegroundCompat(): Boolean {
-        if (Build.VERSION.SDK_INT >= 34 && allowedForegroundServiceTypes() == 0) {
+        val types = if (Build.VERSION.SDK_INT >= 34) allowedForegroundServiceTypes() else 0
+        if (Build.VERSION.SDK_INT >= 34 && types == 0) {
             // Without BODY_SENSORS or RECORD_AUDIO the declared service types cannot be used.
+            Log.w(TAG, "Not starting workout: no granted foreground service permission")
             stopWorkoutService()
             return false
         }
         val notification = buildNotification()
         return try {
             if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIFICATION_ID, notification, allowedForegroundServiceTypes())
+                startForeground(NOTIFICATION_ID, notification, types)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
             true
         } catch (e: Exception) {
             // Missing runtime permissions or background start restrictions must not crash the app.
+            Log.e(TAG, "startForeground failed", e)
             stopWorkoutService()
             false
         }
