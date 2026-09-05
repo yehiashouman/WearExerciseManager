@@ -46,8 +46,9 @@ class SessionStore private constructor(context: Context) {
      * phone stored them, so they are corrected on load.
      */
     private fun reconcile(stored: List<WorkoutSession>): List<WorkoutSession> {
+        if (stored.all { it.syncStatus == SyncStatus.DELIVERED }) return stored
         val corrected = stored.map { it.copy(syncStatus = SyncStatus.DELIVERED) }
-        if (corrected != stored) write(corrected)
+        write(corrected)
         return corrected
     }
 

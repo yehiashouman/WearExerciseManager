@@ -198,8 +198,8 @@ fun ExerciseManagerApp(
 @Composable
 private fun AppFrame(accent: Color, content: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        val screen = remember(maxWidth, maxHeight) { watchMetrics(maxWidth, maxHeight) }
-        CompositionLocalProvider(LocalWatchMetrics provides screen) {
+        val metrics = remember(maxWidth, maxHeight) { watchMetrics(maxWidth, maxHeight) }
+        CompositionLocalProvider(LocalWatchMetrics provides metrics) {
             // Insets are applied per screen: a scrolling list needs more of them than a centred
             // layout that already keeps its content inside the safe width.
             Box(Modifier.fillMaxSize()) { content() }
@@ -495,7 +495,7 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 }
 
 /** Single line of text kept inside the conservative safe width of a round display. */
-@Composable private fun ColumnScope.SafeText(text:String, style: TextStyle) = BasicText(
+@Composable private fun SafeText(text:String, style: TextStyle) = BasicText(
     text,
     style = style,
     maxLines = 1,

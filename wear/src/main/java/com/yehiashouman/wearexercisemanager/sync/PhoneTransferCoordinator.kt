@@ -56,10 +56,8 @@ class PhoneTransferCoordinator private constructor(context: Context) {
                 repo.markTransferStatus(session.id, SyncStatus.SENDING)
                 Log.i(TAG, "Sending session ${session.id} to the phone")
                 val accepted = sync.sendSession(session)
-                // A fast acknowledgement may already have arrived while the payload was written,
-                // and it must never be downgraded back to pending.
-                if (repo.sessionStatus(session.id) == SyncStatus.DELIVERED) return@withLock
-                // Otherwise the phone acknowledgement is still outstanding.
+                // The phone acknowledgement is still outstanding. An acknowledgement that arrived
+                // while the payload was written wins, because the repository keeps DELIVERED final.
                 repo.markTransferStatus(session.id, if (accepted) SyncStatus.PENDING else SyncStatus.FAILED)
                 Log.i(
                     TAG,
