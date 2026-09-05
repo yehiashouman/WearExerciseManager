@@ -166,8 +166,9 @@ data class AppSettings(
      * only recognised during rest, transition and pause so the microphone is off while training.
      *
      * The default is `true` on purpose: the flag used to be unused and the service listened during
-     * every stage, so existing installs (which never persisted the field because it matched the old
-     * default) keep exactly the behaviour they had before this setting was wired up.
+     * every stage. The watch repository serializes with the kotlinx.serialization default of
+     * `encodeDefaults = false`, so existing stores never wrote the old `false` value and therefore
+     * keep exactly the behaviour they had before this setting was wired up.
      */
     val alwaysListening: Boolean = true,
     /** Text-to-speech rate (`VoiceCoach.applySettings`). */
@@ -184,7 +185,7 @@ data class AppSettings(
     val transitionSeconds: Int = 5,
     /** Shows the live heart rate on the active workout screen (`ActiveWorkoutScreen`). */
     val showHeartRate: Boolean = true,
-    /** Stores heart-rate samples in the session history (`WorkoutService.onHeartRate`). */
+    /** Stores heart-rate samples in the session history (heart-rate callback in `WorkoutService.onCreate`). */
     val recordHeartRate: Boolean = true,
     /** Haptic feedback on every stage change (`WorkoutService.vibrate`). */
     val vibration: Boolean = true,

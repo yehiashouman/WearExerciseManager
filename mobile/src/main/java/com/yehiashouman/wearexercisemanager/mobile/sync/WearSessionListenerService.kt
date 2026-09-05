@@ -1,6 +1,7 @@
 package com.yehiashouman.wearexercisemanager.mobile.sync
 
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
@@ -28,6 +29,9 @@ class WearSessionListenerService : WearableListenerService() {
 
     override fun onDataChanged(dataEvents: DataEventBuffer) {
         val store = SessionStore.getInstance(applicationContext)
+        // One shared budget for the whole buffer, so a batch of sessions can never block the
+        // listener callback for a multiple of the per-session timeout.
+        val syncDeadline = SystemClock.elapsedRealtime() + SYNC_BUDGET_MS
         dataEvents.forEach { event ->
             val path = event.dataItem.uri.path.orEmpty()
             Log.i(TAG, "DataEvent received (type=${event.type}) for path $path")
@@ -66,7 +70,7 @@ class WearSessionListenerService : WearableListenerService() {
                         .onFailure { Log.e(TAG, "Could not store session ${session.id}", it) }
                         .onSuccess {
                             acknowledge(session.id)
-                            syncToSamsungHealth(session, samsungHealthSync)
+                            syncToSamsungHealth(session, samsungHealthSync, syncDeadline)
                         }
                 }
         }
@@ -76,16 +80,21 @@ class WearSessionListenerService : WearableListenerService() {
      * Honours the watch's "Samsung Health sync" setting. The session is always stored locally; only
      * the forwarding to Samsung Health is skipped when the user disabled it.
      */
-    private fun syncToSamsungHealth(session: WorkoutSession, enabled: Boolean) {
+    private fun syncToSamsungHealth(session: WorkoutSession, enabled: Boolean, deadline: Long) {
         if (!enabled) {
             Log.i(TAG, "Samsung Health sync disabled on the watch; skipping session ${session.id}")
             return
         }
         // The write has to finish while onDataChanged is still running, because the service may be
-        // torn down right after it returns. The timeout keeps a slow gateway from stalling the
-        // listener callback and the remaining events in the same buffer.
+        // torn down right after it returns. The remaining budget keeps a slow gateway from stalling
+        // the listener callback and the other events in the same buffer.
+        val remaining = deadline - SystemClock.elapsedRealtime()
+        if (remaining <= 0) {
+            Log.w(TAG, "Samsung Health sync budget exhausted; session ${session.id} was not forwarded")
+            return
+        }
         val result: Result<Unit> = runCatching {
-            runBlocking { withTimeout(SYNC_TIMEOUT_MS) { samsungHealth.sync(session) } }
+            runBlocking { withTimeout(remaining) { samsungHealth.sync(session) } }
         }.getOrElse { Result.failure(it) }
         result
             .onFailure { Log.w(TAG, "Samsung Health sync unavailable for session ${session.id}: ${it.message}") }
@@ -115,6 +124,6 @@ class WearSessionListenerService : WearableListenerService() {
 
     private companion object {
         const val TAG = "WearSessionListener"
-        const val SYNC_TIMEOUT_MS = 10_000L
+        const val SYNC_BUDGET_MS = 10_000L
     }
 }
