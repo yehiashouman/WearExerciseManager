@@ -32,13 +32,14 @@ class HeartRateMonitor(context: Context, private val onHeartRate: (Double?) -> U
             onHeartRate(null)
             return false
         }
+        val sensorManager = manager
         if (!HeartRatePermissions.granted(appContext)) {
             Log.w(TAG, "Heart-rate permission not granted; skipping sensor registration")
             onHeartRate(null)
             return false
         }
         registered = runCatching {
-            manager.registerListener(this, target, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(this, target, SensorManager.SENSOR_DELAY_NORMAL)
         }.onFailure { Log.w(TAG, "Could not register the heart-rate listener", it) }.getOrDefault(false)
         if (!registered) onHeartRate(null)
         return registered
