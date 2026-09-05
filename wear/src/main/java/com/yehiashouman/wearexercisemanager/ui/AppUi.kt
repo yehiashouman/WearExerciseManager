@@ -483,11 +483,9 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 @Composable private fun FixedScreen(content:@Composable ColumnScope.()->Unit) {
     val m = currentWatchMetrics
     Column(
-        Modifier.fillMaxSize().padding(
-            horizontal = m.horizontalInset / 2,
-            top = m.topInset * 0.8f,
-            bottom = m.bottomInset * 0.8f
-        ),
+        Modifier.fillMaxSize()
+            .padding(horizontal = m.horizontalInset / 2)
+            .padding(top = m.topInset * 0.8f, bottom = m.bottomInset * 0.8f),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(m.tightGap, Alignment.CenterVertically),
         content = content
