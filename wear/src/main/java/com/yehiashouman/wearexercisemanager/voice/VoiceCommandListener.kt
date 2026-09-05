@@ -15,7 +15,11 @@ import java.util.Locale
  * Continuous command recognition: recognition is automatically restarted after every result,
  * end-of-speech or error, so the user never has to touch the watch to reactivate it.
  */
-class VoiceCommandListener(context: Context, private val onCommand: (String) -> Unit) : RecognitionListener {
+class VoiceCommandListener(
+    context: Context,
+    private val onCommand: (String) -> Unit,
+    private val onEnabledChanged: (Boolean) -> Unit = {}
+) : RecognitionListener {
     private val appContext = context.applicationContext
     private val available = SpeechRecognizer.isRecognitionAvailable(appContext)
     private val recognizer = if (available) {
@@ -42,13 +46,18 @@ class VoiceCommandListener(context: Context, private val onCommand: (String) -> 
 
     fun start() {
         if (destroyed || recognizer == null) return
+        val wasEnabled = enabled
         enabled = true
+        consecutiveErrors = 0
+        if (!wasEnabled) onEnabledChanged(true)
         beginListening()
     }
 
     fun stop() {
+        val wasEnabled = enabled
         enabled = false
         listening = false
+        if (wasEnabled) onEnabledChanged(false)
         handler.removeCallbacks(restart)
         runCatching { recognizer?.cancel() }
     }
@@ -68,6 +77,13 @@ class VoiceCommandListener(context: Context, private val onCommand: (String) -> 
         } else {
             listening = true
         }
+    }
+
+    private fun disable() {
+        if (!enabled) return
+        enabled = false
+        handler.removeCallbacks(restart)
+        onEnabledChanged(false)
     }
 
     private fun scheduleRestart(delayMs: Long) {
@@ -118,13 +134,13 @@ class VoiceCommandListener(context: Context, private val onCommand: (String) -> 
             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
                 // The workout must keep running without microphone access.
                 Log.w(TAG, "Microphone permission missing, voice commands disabled")
-                enabled = false
+                disable()
             }
             else -> {
                 consecutiveErrors++
                 if (consecutiveErrors > MAX_CONSECUTIVE_ERRORS) {
                     Log.w(TAG, "Speech recognition unavailable (error $error), giving up")
-                    enabled = false
+                    disable()
                 } else {
                     scheduleRestart(RESTART_BACKOFF_MS * consecutiveErrors)
                 }

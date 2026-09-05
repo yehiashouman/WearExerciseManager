@@ -25,6 +25,7 @@ import com.yehiashouman.wearexercisemanager.shared.*
 import com.yehiashouman.wearexercisemanager.voice.VoiceCoach
 import com.yehiashouman.wearexercisemanager.workout.WorkoutService
 import com.yehiashouman.wearexercisemanager.workout.WorkoutStage
+import com.yehiashouman.wearexercisemanager.workout.WorkoutUiState
 import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
 import java.util.*
@@ -227,7 +228,7 @@ private fun WorkoutEditor(original: WorkoutPreset?, exercises: List<ExerciseDefi
 }
 
 @Composable
-private fun ActiveWorkoutScreen(state: com.yehiashouman.wearexercisemanager.workout.WorkoutUiState, accent: Color, action:(String)->Unit) {
+private fun ActiveWorkoutScreen(state: WorkoutUiState, accent: Color, action:(String)->Unit) {
     AppColumn(horizontal = Alignment.CenterHorizontally) {
         if (state.paused) Header("PAUSED") else Header(state.exerciseName.ifBlank { state.presetName })
         Body(state.setLabel, true)
@@ -236,7 +237,7 @@ private fun ActiveWorkoutScreen(state: com.yehiashouman.wearexercisemanager.work
         Body(when (state.stage) { WorkoutStage.REST -> "REST"; WorkoutStage.TRANSITION -> "GET READY"; WorkoutStage.PAUSED -> "Paused"; else -> "Cycle ${state.cycle} of ${state.totalCycles}" }, true)
         state.heartRate?.let { Body("♥ ${it.toInt()} bpm") }
         Muted("Step ${state.currentStep} / ${state.totalSteps}${if (state.listening) "  •  Listening" else ""}")
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        CenteredButtonRow {
             Row(Modifier.fillMaxWidth(ButtonWidthFraction), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (state.paused) PrimaryButtonSurface("Resume", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_RESUME) }
                 else PrimaryButtonSurface("Pause", accent, true, Modifier.weight(1f)) { action(WorkoutService.ACTION_PAUSE) }
@@ -248,7 +249,7 @@ private fun ActiveWorkoutScreen(state: com.yehiashouman.wearexercisemanager.work
 }
 
 @Composable
-private fun WorkoutSummaryScreen(state: com.yehiashouman.wearexercisemanager.workout.WorkoutUiState, accent: Color, onDone:()->Unit) {
+private fun WorkoutSummaryScreen(state: WorkoutUiState, accent: Color, onDone:()->Unit) {
     AppColumn(horizontal = Alignment.CenterHorizontally) {
         Header(if (state.completed) "Workout Complete" else "Workout Stopped")
         Body(state.presetName, true)
@@ -273,7 +274,7 @@ private fun HistoryScreen(history: List<WorkoutSession>, accent: Color, onBack:(
             Muted("${seconds / 60} min active • ${s.intervals.size} intervals")
             val avg = s.heartRates.filterNot { it.paused }.map { it.bpm }.average()
             if (!avg.isNaN()) Muted("Avg HR ${avg.toInt()} bpm")
-            Muted("Phone transfer: ${syncStatusLabel(s.syncStatus)}")
+            Muted("Phone transfer: ${s.syncStatus.displayLabel()}")
         } }
         if (history.isNotEmpty()) SmallButton("Clear History", accent, onClear)
         SmallButton("Back", accent, onBack)
@@ -394,12 +395,6 @@ private fun AboutScreen(accent: Color, onBack:()->Unit) {
 }
 
 private fun <T> List<T>.replace(index:Int, item:T) = toMutableList().also { it[index]=item }.toList()
-private fun syncStatusLabel(status: SyncStatus) = when (status) {
-    SyncStatus.PHONE_RECEIVED -> "delivered to phone"
-    SyncStatus.SYNCED -> "synced"
-    SyncStatus.FAILED -> "failed"
-    else -> "pending"
-}
 private fun formatTime(seconds:Int) = "%02d:%02d".format(seconds / 60, seconds % 60)
 private fun accentColor(name:String) = when(name) { "green"->Color(0xFF55DD88); "orange"->Color(0xFFFFA64D); "red"->Color(0xFFFF6666); "purple"->Color(0xFFBB86FC); "monochrome"->Color.White; else->Color(0xFF63B3FF) }
 private fun iconGlyph(key:String) = when(key) { "strength"->"◆"; "legs"->"▲"; "core"->"●"; "cardio"->"♥"; "run"->"➤"; "walk"->"•"; "cycle"->"○"; else->"◇" }

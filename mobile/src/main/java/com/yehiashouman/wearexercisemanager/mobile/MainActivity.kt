@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.yehiashouman.wearexercisemanager.mobile.sync.SessionStore
+import com.yehiashouman.wearexercisemanager.shared.displayLabel
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -31,7 +32,7 @@ class MainActivity : ComponentActivity() {
                                 Text(session.presetName, style = MaterialTheme.typography.titleMedium)
                                 Text(fmt.format(Date(session.startedAtEpochMs)))
                                 Text("${session.intervals.size} exercise intervals")
-                                Text("Watch transfer: ${session.syncStatus.name.lowercase().replace('_', ' ')}")
+                                Text("Watch transfer: ${session.syncStatus.displayLabel()}")
                             }
                         }
                     }

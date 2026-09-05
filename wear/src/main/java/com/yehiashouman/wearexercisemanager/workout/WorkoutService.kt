@@ -67,7 +67,11 @@ class WorkoutService : Service() {
         super.onCreate()
         repo = AppRepository.getInstance(applicationContext)
         voice = VoiceCoach(applicationContext)
-        commands = VoiceCommandListener(applicationContext, ::handleVoiceCommand)
+        commands = VoiceCommandListener(
+            applicationContext,
+            onCommand = ::handleVoiceCommand,
+            onEnabledChanged = { active -> _state.value = _state.value.copy(listening = active) }
+        )
         hr = HeartRateMonitor(applicationContext) { bpm ->
             heartRates += HeartRateSample(System.currentTimeMillis(), bpm, paused)
             _state.value = _state.value.copy(heartRate = bpm)
@@ -332,7 +336,8 @@ class WorkoutService : Service() {
     private fun retryPendingPhoneTransfers() {
         scope.launch {
             val pending = repo.store.value.history
-                .filter { it.syncStatus != SyncStatus.PHONE_RECEIVED && it.syncStatus != SyncStatus.SYNCED }
+                .filter { it.syncStatus == SyncStatus.PENDING || it.syncStatus == SyncStatus.PENDING_PHONE_TRANSFER }
+                .sortedByDescending { it.endedAtEpochMs }
                 .take(MAX_PENDING_RETRIES)
             if (pending.isEmpty()) return@launch
             Log.i(TAG, "Retrying phone transfer for ${pending.size} pending session(s)")

@@ -10,13 +10,14 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 class VoiceCoach(context: Context) : TextToSpeech.OnInitListener {
     private val tts = TextToSpeech(context.applicationContext, this)
     private var ready = false
     private var settings = AppSettings()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
-    private var utteranceCounter = 0L
+    private val utteranceCounter = AtomicLong(0)
 
     init {
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -78,7 +79,7 @@ class VoiceCoach(context: Context) : TextToSpeech.OnInitListener {
 
     private fun speakInternal(text: String, flush: Boolean): String? {
         if (!ready || !settings.voiceAnnouncements) return null
-        val id = "utt-${utteranceCounter++}"
+        val id = "utt-${utteranceCounter.getAndIncrement()}"
         val deferred = CompletableDeferred<Unit>()
         pending[id] = deferred
         val result = runCatching {

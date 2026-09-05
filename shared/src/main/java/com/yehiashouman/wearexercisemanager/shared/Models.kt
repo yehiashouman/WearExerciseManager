@@ -12,6 +12,14 @@ enum class SessionStatus { COMPLETED, STOPPED }
 @Serializable
 enum class SyncStatus { PENDING, PENDING_PHONE_TRANSFER, PHONE_RECEIVED, SYNCED, FAILED }
 
+/** User facing description of a session transfer state, shared by the watch and phone UIs. */
+fun SyncStatus.displayLabel(): String = when (this) {
+    SyncStatus.PENDING, SyncStatus.PENDING_PHONE_TRANSFER -> "pending"
+    SyncStatus.PHONE_RECEIVED -> "delivered to phone"
+    SyncStatus.SYNCED -> "synced"
+    SyncStatus.FAILED -> "failed"
+}
+
 @Serializable
 data class ExerciseSet(
     val id: String = UUID.randomUUID().toString(),
