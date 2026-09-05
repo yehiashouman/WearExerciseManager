@@ -42,7 +42,7 @@ class VoiceCoach(context: Context) : TextToSpeech.OnInitListener {
             applySettings(settings)
         } else {
             Log.w(TAG, "TextToSpeech unavailable, continuing without spoken guidance")
-            // Nothing may wait forever for an engine that never initialised.
+            // No caller should wait forever for an engine that never initialised.
             pending.keys.toList().forEach { complete(it) }
         }
     }

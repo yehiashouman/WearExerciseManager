@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
+import com.yehiashouman.wearexercisemanager.shared.WearDataPaths
 import com.yehiashouman.wearexercisemanager.shared.WorkoutSession
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.encodeToString
@@ -16,7 +17,7 @@ class WearSyncManager(context: Context) {
     private val json = Json { encodeDefaults = true }
 
     suspend fun sendSession(session: WorkoutSession): Boolean = runCatching {
-        val path = "$SESSION_PATH_PREFIX${session.id}"
+        val path = "${WearDataPaths.SESSION_PREFIX}${session.id}"
         val nodes = runCatching { nodeClient.connectedNodes.await() }.getOrDefault(emptyList())
         Log.i(TAG, "Attempting phone transfer of session ${session.id} to ${nodes.size} connected node(s)")
         val request = PutDataMapRequest.create(path).apply {
@@ -36,9 +37,8 @@ class WearSyncManager(context: Context) {
     }.onFailure { Log.e(TAG, "Phone transfer failed for session ${session.id}", it) }
         .getOrDefault(false)
 
-    companion object {
-        const val SESSION_PATH_PREFIX = "/workout-session/"
-        private const val TAG = "WearSyncManager"
+    private companion object {
+        const val TAG = "WearSyncManager"
     }
 }
 

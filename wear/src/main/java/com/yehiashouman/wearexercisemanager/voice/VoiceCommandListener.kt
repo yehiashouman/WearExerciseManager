@@ -92,6 +92,8 @@ class VoiceCommandListener(
 
     private fun scheduleRestart(delayMs: Long) {
         if (destroyed || !enabled) return
+        // A new recognition session starts, so the de-duplication window is reset here as well.
+        commandDispatched = false
         handler.removeCallbacks(restart)
         handler.postDelayed(restart, delayMs)
     }

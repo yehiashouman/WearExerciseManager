@@ -3,6 +3,12 @@ package com.yehiashouman.wearexercisemanager.shared
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
+/** Wearable Data Layer paths shared by the watch sender and the phone listener. */
+object WearDataPaths {
+    /** Must stay in sync with the mobile manifest's `android:pathPrefix`. */
+    const val SESSION_PREFIX = "/workout-session/"
+}
+
 @Serializable
 enum class WorkoutStyle { SEQUENTIAL, CIRCUIT }
 

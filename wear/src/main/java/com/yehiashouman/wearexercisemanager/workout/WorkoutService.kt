@@ -20,6 +20,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class WorkoutService : Service() {
     companion object {
@@ -45,6 +47,8 @@ class WorkoutService : Service() {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val transferMutex = Mutex()
+    private val transfersInFlight = mutableSetOf<String>()
     private lateinit var repo: AppRepository
     private lateinit var voice: VoiceCoach
     private lateinit var commands: VoiceCommandListener
@@ -326,12 +330,21 @@ class WorkoutService : Service() {
      * the phone. A failed transfer keeps the session locally so it can be retried later.
      */
     private suspend fun transferToPhone(session: WorkoutSession) {
-        Log.i(TAG, "Attempting phone transfer for session ${session.id}")
-        val delivered = sync.sendSession(session)
-        repo.markSynced(session.id, if (delivered) SyncStatus.PHONE_RECEIVED else SyncStatus.PENDING_PHONE_TRANSFER)
-        val message = if (delivered) "Phone transfer succeeded for session ${session.id}"
-            else "Phone transfer failed for session ${session.id}; kept locally as pending"
-        Log.i(TAG, message)
+        // Transfers are serialized so a retry and a just-finished workout cannot send the same
+        // session twice or race each other's markSynced() writes.
+        if (!transfersInFlight.add(session.id)) return
+        try {
+            transferMutex.withLock {
+                Log.i(TAG, "Attempting phone transfer for session ${session.id}")
+                val delivered = sync.sendSession(session)
+                repo.markSynced(session.id, if (delivered) SyncStatus.PHONE_RECEIVED else SyncStatus.PENDING_PHONE_TRANSFER)
+                val message = if (delivered) "Phone transfer succeeded for session ${session.id}"
+                    else "Phone transfer failed for session ${session.id}; kept locally as pending"
+                Log.i(TAG, message)
+            }
+        } finally {
+            transfersInFlight -= session.id
+        }
     }
 
     private fun retryPendingPhoneTransfers() {
