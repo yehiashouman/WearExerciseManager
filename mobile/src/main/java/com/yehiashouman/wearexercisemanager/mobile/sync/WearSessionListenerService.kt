@@ -1,10 +1,12 @@
 package com.yehiashouman.wearexercisemanager.mobile.sync
 
+import android.net.Uri
 import android.util.Log
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.PutDataMapRequest
+import com.google.android.gms.wearable.PutDataRequest
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.yehiashouman.wearexercisemanager.shared.WearDataPaths
@@ -24,8 +26,14 @@ class WearSessionListenerService : WearableListenerService() {
         dataEvents.forEach { event ->
             val path = event.dataItem.uri.path.orEmpty()
             Log.i(TAG, "DataEvent received (type=${event.type}) for path $path")
-            if (event.type != DataEvent.TYPE_CHANGED) return@forEach
             if (!path.startsWith(WearDataPaths.SESSION_PREFIX)) return@forEach
+            if (event.type == DataEvent.TYPE_DELETED) {
+                // The watch removes the payload after it applied the acknowledgement, so the
+                // matching acknowledgement is no longer needed either.
+                deleteAcknowledgement(path.removePrefix(WearDataPaths.SESSION_PREFIX))
+                return@forEach
+            }
+            if (event.type != DataEvent.TYPE_CHANGED) return@forEach
             val raw = DataMapItem.fromDataItem(event.dataItem).dataMap.getString(WearDataPaths.KEY_SESSION_JSON)
             if (raw == null) {
                 Log.w(TAG, "Data item at $path had no session payload")
@@ -57,6 +65,17 @@ class WearSessionListenerService : WearableListenerService() {
         runCatching { Tasks.await(Wearable.getDataClient(applicationContext).putDataItem(request)) }
             .onFailure { Log.e(TAG, "Could not acknowledge session $sessionId", it) }
             .onSuccess { Log.i(TAG, "Acknowledged session $sessionId to the watch") }
+    }
+
+    private fun deleteAcknowledgement(sessionId: String) {
+        if (sessionId.isBlank()) return
+        val uri = Uri.Builder()
+            .scheme(PutDataRequest.WEAR_URI_SCHEME)
+            .authority("*")
+            .path("${WearDataPaths.SESSION_ACK_PREFIX}$sessionId")
+            .build()
+        runCatching { Tasks.await(Wearable.getDataClient(applicationContext).deleteDataItems(uri)) }
+            .onFailure { Log.w(TAG, "Could not delete acknowledgement of session $sessionId", it) }
     }
 
     private companion object {

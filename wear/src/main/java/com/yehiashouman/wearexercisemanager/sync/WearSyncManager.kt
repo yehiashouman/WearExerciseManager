@@ -51,6 +51,17 @@ class WearSyncManager(context: Context) {
     }.onFailure { Log.e(TAG, "Phone transfer failed for session ${session.id}", it) }
         .getOrDefault(false)
 
+    /** Removes the payload of a session the phone has confirmed, keeping the Data Layer small. */
+    suspend fun deleteSession(sessionId: String) {
+        val uri = Uri.Builder()
+            .scheme(PutDataRequest.WEAR_URI_SCHEME)
+            .authority("*")
+            .path("${WearDataPaths.SESSION_PREFIX}$sessionId")
+            .build()
+        runCatching { client.deleteDataItems(uri).await() }
+            .onFailure { Log.w(TAG, "Could not delete payload of session $sessionId", it) }
+    }
+
     /**
      * Acknowledgements already present on the Data Layer. Used to reconcile sessions whose
      * acknowledgement arrived while the watch app was not running.

@@ -82,6 +82,9 @@ class PhoneTransferCoordinator private constructor(context: Context) {
         if (current == SyncStatus.DELIVERED) return
         repo.markTransferStatus(sessionId, SyncStatus.DELIVERED)
         Log.i(TAG, "Session $sessionId acknowledged by the phone")
+        // The payload has served its purpose; removing it also makes the phone drop its
+        // acknowledgement, so neither side accumulates data items.
+        scope.launch { sync.deleteSession(sessionId) }
     }
 
     /**
@@ -95,10 +98,12 @@ class PhoneTransferCoordinator private constructor(context: Context) {
             try {
                 sync.acknowledgedSessionIds().forEach { acknowledge(it) }
                 for (round in 0 until MAX_RETRY_ROUNDS) {
-                    val pending = pendingSessions()
+                    // Later rounds only repeat the attempts the Data Layer refused: a payload that
+                    // was accepted is simply waiting for its acknowledgement and must not be resent.
+                    val pending = if (round == 0) pendingSessions() else pendingSessions(SyncStatus.FAILED)
                     if (pending.isEmpty()) break
                     if (round > 0) delay(RETRY_BACKOFF_MS * round)
-                    Log.i(TAG, "Retrying phone transfer for ${pending.size} session(s), round ${round + 1}")
+                    Log.i(TAG, "Sending ${pending.size} unconfirmed session(s) to the phone, round ${round + 1}")
                     pending.forEach { transfer(it) }
                 }
             } finally {
@@ -107,8 +112,8 @@ class PhoneTransferCoordinator private constructor(context: Context) {
         }
     }
 
-    private fun pendingSessions(): List<WorkoutSession> = repo.store.value.history
-        .filter { it.syncStatus != SyncStatus.DELIVERED }
+    private fun pendingSessions(only: SyncStatus? = null): List<WorkoutSession> = repo.store.value.history
+        .filter { if (only == null) it.syncStatus != SyncStatus.DELIVERED else it.syncStatus == only }
         .sortedByDescending { it.endedAtEpochMs }
         .take(MAX_PENDING_RETRIES)
 }
