@@ -65,6 +65,16 @@ private const val SafeWidthFraction = 0.78f
  */
 private const val ControlRowWidthFraction = 0.70f
 
+/**
+ * Share of the display height kept free below the workout controls. At roughly 85% of the height
+ * the chord of the circle is still wide enough for the full control row, so reserving the remaining
+ * ~15% keeps the buttons clear of the lower arc.
+ */
+private const val WorkoutBottomReserve = 0.145f
+
+/** Same idea for the summary screen, whose widest bottom element is the narrower "Done" button. */
+private const val SummaryBottomReserve = 0.11f
+
 /** Neutral background shared by all workout controls so they are visually identical. */
 private val ControlBackground = Color(0xFF2E2E2E)
 
@@ -335,7 +345,7 @@ private fun WorkoutEditor(original: WorkoutPreset?, exercises: List<ExerciseDefi
 private fun ActiveWorkoutScreen(state: WorkoutUiState, showHeartRate: Boolean, accent: Color, action:(String)->Unit) {
     val m = currentWatchMetrics
     // Everything the athlete needs is visible at once: this screen never scrolls.
-    FixedScreen(bottomFraction = 0.145f) {
+    FixedScreen(bottomFraction = WorkoutBottomReserve) {
         val stageToken = when (state.stage) {
             WorkoutStage.REST -> "REST"
             WorkoutStage.TRANSITION -> "GET READY"
@@ -404,7 +414,7 @@ private fun heartRateText(bpm: Double?) = "♥ ${bpm?.toInt()?.toString() ?: "--
 private fun WorkoutSummaryScreen(state: WorkoutUiState, accent: Color, onDone:()->Unit) {
     val m = currentWatchMetrics
     // The whole summary has to be readable without scrolling, so the type scale stays modest.
-    FixedScreen(bottomFraction = 0.11f) {
+    FixedScreen(bottomFraction = SummaryBottomReserve) {
         SafeText(
             if (state.completed) "Workout Complete" else "Workout Stopped",
             TextStyle(Color.White, m.heading, FontWeight.Bold, textAlign = TextAlign.Center)

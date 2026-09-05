@@ -15,10 +15,13 @@ object HeartRatePermissions {
     /** Declared in the manifest as well; kept as a literal because the constant needs API 36. */
     const val READ_HEART_RATE = "android.permission.health.READ_HEART_RATE"
 
-    /** Permissions that should be requested on the current platform, most specific one first. */
+    /**
+     * The permission that can actually be granted on the current platform. Below API 36 the health
+     * permission is not defined, so requesting it would only produce a denial on every app start.
+     */
     fun requestable(): List<String> =
         if (Build.VERSION.SDK_INT >= 36) listOf(READ_HEART_RATE)
-        else listOf(Manifest.permission.BODY_SENSORS, READ_HEART_RATE)
+        else listOf(Manifest.permission.BODY_SENSORS)
 
     /** True when the watch may read heart-rate data through either permission model. */
     fun granted(context: Context): Boolean =
