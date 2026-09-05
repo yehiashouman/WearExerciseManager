@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.yehiashouman.wearexercisemanager"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.yehiashouman.wearexercisemanager"
