@@ -25,7 +25,14 @@ class WearSyncManager(context: Context) {
         }.asPutDataRequest().setUrgent()
         client.putDataItem(request).await()
         Log.i(TAG, "DataItem created at $path (${session.intervals.size} intervals)")
-        true
+        // The data item is written locally even without a peer, so an empty node list means the
+        // session has not reached the phone yet and must stay pending for a later retry.
+        if (nodes.isEmpty()) {
+            Log.w(TAG, "No connected phone node; session ${session.id} stays pending")
+            false
+        } else {
+            true
+        }
     }.onFailure { Log.e(TAG, "Phone transfer failed for session ${session.id}", it) }
         .getOrDefault(false)
 

@@ -42,6 +42,9 @@ class VoiceCommandListener(
     private var destroyed = false
     private var consecutiveErrors = 0
 
+    /** Guards against dispatching the same command twice from a partial and a final result. */
+    private var commandDispatched = false
+
     val isAvailable: Boolean get() = recognizer != null
 
     fun start() {
@@ -70,6 +73,7 @@ class VoiceCommandListener(
 
     private fun beginListening() {
         if (destroyed || !enabled || listening) return
+        commandDispatched = false
         val result = runCatching { recognizer?.startListening(intent) }
         if (result.isFailure) {
             Log.w(TAG, "Could not start speech recognition", result.exceptionOrNull())
@@ -114,7 +118,9 @@ class VoiceCommandListener(
                 else -> null
             }
         }
-        if (command != null) onCommand(command)
+        if (command == null || commandDispatched) return
+        commandDispatched = true
+        onCommand(command)
     }
 
     override fun onReadyForSpeech(params: Bundle?) = Unit

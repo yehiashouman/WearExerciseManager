@@ -329,8 +329,9 @@ class WorkoutService : Service() {
         Log.i(TAG, "Attempting phone transfer for session ${session.id}")
         val delivered = sync.sendSession(session)
         repo.markSynced(session.id, if (delivered) SyncStatus.PHONE_RECEIVED else SyncStatus.PENDING_PHONE_TRANSFER)
-        Log.i(TAG, if (delivered) "Phone transfer succeeded for session ${session.id}"
-        else "Phone transfer failed for session ${session.id}; kept locally as pending")
+        val message = if (delivered) "Phone transfer succeeded for session ${session.id}"
+            else "Phone transfer failed for session ${session.id}; kept locally as pending"
+        Log.i(TAG, message)
     }
 
     private fun retryPendingPhoneTransfers() {
